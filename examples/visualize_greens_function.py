@@ -81,21 +81,23 @@ if __name__ == "__main__":
     # --- Scenarios ---
 
     # Scenario 1: Right-lateral strike-slip (Vertical Fault)
-    # cutde strike-slip is positive for left-lateral, so right-lateral is negative
-    slip_right_lateral = np.array([-1.0, -1.0, 0.0, 0.0])
+    # Following user's convention: positive for right-lateral strike-slip
+    slip_right_lateral = np.array([1.0, 1.0, 0.0, 0.0])
     plot_enu_response(axes[0], "Right-Lateral Strike-Slip", fault_vertical, slip_right_lateral, engine, obs_coords)
 
     # Scenario 2: Left-lateral strike-slip (Vertical Fault)
-    slip_left_lateral = np.array([1.0, 1.0, 0.0, 0.0])
+    # Following user's convention: negative for left-lateral strike-slip
+    slip_left_lateral = np.array([-1.0, -1.0, 0.0, 0.0])
     plot_enu_response(axes[1], "Left-Lateral Strike-Slip", fault_vertical, slip_left_lateral, engine, obs_coords)
 
     # Scenario 3: Normal Faulting (Dip=60)
-    # cutde dip-slip is positive for reverse, so normal is negative
-    slip_normal = np.array([0.0, 0.0, -1.0, -1.0])
+    # Following user's convention: positive for normal faulting
+    slip_normal = np.array([0.0, 0.0, 1.0, 1.0])
     plot_enu_response(axes[2], "Normal Faulting (Dip=60)", fault_dipping, slip_normal, engine, obs_coords)
 
     # Scenario 4: Reverse Faulting (Dip=60)
-    slip_reverse = np.array([0.0, 0.0, 1.0, 1.0])
+    # Following user's convention: negative for reverse faulting
+    slip_reverse = np.array([0.0, 0.0, -1.0, -1.0])
     plot_enu_response(axes[3], "Reverse Faulting (Dip=60)", fault_dipping, slip_reverse, engine, obs_coords)
     
     # Save the final figure
