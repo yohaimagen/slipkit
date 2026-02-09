@@ -147,3 +147,7 @@ site/
 .com.apple.timemachine.donotpresent
 ehthumbs.db
 Thumbs.db
+
+*.png
+/test_notebooks/
+
