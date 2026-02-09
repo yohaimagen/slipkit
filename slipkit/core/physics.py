@@ -67,20 +67,22 @@ class CutdeCpuEngine(GreenFunctionBuilder):
         g_matrix = np.zeros((n_obs, 2 * n_patches))
 
         # Project displacements onto unit vectors (e.g., satellite LOS)
-        # dataset.unit_vecs is (N, 3), so we need to align dimensions for broadcasting
-        unit_vecs_expanded = dataset.unit_vecs[:, np.newaxis, :] # -> (N, 1, 3)
+        # dataset.unit_vecs is (N, 3), so we align dimensions for broadcasting.
+        # disp_mat is (N, 3, M, 3), so unit_vecs needs to be (N, 3, 1)
+        unit_vecs_expanded = dataset.unit_vecs[:, :, np.newaxis]
 
         # Response to strike-slip component (slip_dim=0)
-        # disp_mat is (N, M, 3, 3). We want disp_mat[:, :, :, 0] which is (N, M, 3)
-        # Sum over the displacement components (axis=2) after element-wise multiplication
+        # disp_mat[:, :, :, 0] is (N, 3, M).
+        # Element-wise multiplication with (N, 3, 1) broadcasts to (N, 3, M).
+        # We sum over the displacement components (axis=1).
         strike_slip_response = np.sum(
-            disp_mat[:, :, :, 0] * unit_vecs_expanded, axis=2
-        ) # -> (N, M)
-        
+            disp_mat[:, :, :, 0] * unit_vecs_expanded, axis=1
+        )  # -> (N, M)
+
         # Response to dip-slip component (slip_dim=1)
         dip_slip_response = np.sum(
-            disp_mat[:, :, :, 1] * unit_vecs_expanded, axis=2
-        ) # -> (N, M)
+            disp_mat[:, :, :, 1] * unit_vecs_expanded, axis=1
+        )  # -> (N, M)
 
         # Populate the G matrix
         # Columns 0 to M-1 are for strike-slip

@@ -35,10 +35,8 @@ def test_cutde_cpu_engine_build_kernel(
     n_obs = len(sample_geodetic_dataset)
     n_patches = sample_fault_mesh.num_patches()
     
-    # Create a mock return value for disp_matrix with shape (N, M, 3, 3)
-    # This matrix maps slip components to displacement components.
-    # For simplicity, let's make it an array of ones.
-    mock_g_raw = np.ones((n_obs, n_patches, 3, 3))
+    # Create a mock return value for disp_matrix with the correct shape (N, 3, M, 3)
+    mock_g_raw = np.ones((n_obs, 3, n_patches, 3))
     mock_disp_matrix.return_value = mock_g_raw
     
     engine = CutdeCpuEngine(poisson_ratio=0.25)
