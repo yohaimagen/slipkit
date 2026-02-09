@@ -1,0 +1,149 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+#  Usually these are temporary files created by PyInstaller
+#  One-file builds
+#    build     - temporary directory containing the generated executable
+#    dist      - default directory for the bundled app
+#    spec file - defines how the executable is built
+*.spec
+#  Enable if you want to ignore the executable files
+#*.exe
+#*.app
+#*.bin
+#*.dmg
+
+# Pytest
+.pytest_cache/
+.coverage
+.tox/
+
+# Conda
+.conda/
+env/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# General
+.DS_Store
+*.log
+*.tmp
+*.swp
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.project
+*.pydevproject
+.project
+.settings/
+*.sublime-workspace
+*.sublime-project
+
+# Secrets
+*.env
+.env.*
+*.pem
+*.key
+credentials/
+secrets.*
+*.json
+*.ini
+config.json
+
+# SlipKit specific
+*.msh
+*.stl
+sentinel.h5
+*.tif
+*.csv
+.DS_Store
+results/
+output/
+figures/
+notebooks/
+venv/
+*.ipynb
+
+# Data
+data/
+*.h5
+*.nc
+
+# Docs
+docs/_build/
+site/
+
+# Build artifacts
+*.o
+*.a
+*.out
+*.exe
+*.dll
+*.lib
+*.exp
+*.obj
+*.pdb
+*.ilk
+*.pch
+
+# Python
+*.pkl
+*.pickle
+*.dat
+*.npy
+*.npz
+
+# Other
+.cache/
+.python-version
+*.log
+*~
+*.orig
+*.rej
+*.swo
+*.swp
+*.bak
+*.lock
+
+# OSX
+.AppleDouble
+.LSOverride
+.Trashes
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+ehthumbs.db
+Thumbs.db
