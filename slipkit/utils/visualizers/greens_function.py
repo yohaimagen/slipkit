@@ -143,4 +143,3 @@ class GreenFunctionVisualizer:
             plt.close(fig)
 
         return ax
-
