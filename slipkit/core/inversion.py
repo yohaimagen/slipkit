@@ -65,12 +65,17 @@ class AbstractAssembler(ABC):
 
 class VanillaAssembler(AbstractAssembler):
     """
-    The standard assembler for a simple, single-event inversion.
-
-    This assembler assumes that every fault contributes to every dataset. It builds
-    a single Green's function matrix relating all slip parameters to all
-    data points.
+    The standard assembler for a simple, single-event inversion with caching.
+    
+    It calculates the elastic Green's function matrix G once and caches it.
+    Subsequent calls to assemble() reuse this matrix unless a rebuild is forced.
     """
+
+    def __init__(self):
+        # Cache storage
+        self._G_elastic_cache: Optional[List[np.ndarray]] = None
+        self._data_vector_cache: Optional[np.ndarray] = None
+        self._sigma_inv_cache: Optional[List[np.ndarray]] = None
 
     def assemble(
         self,
@@ -79,49 +84,104 @@ class VanillaAssembler(AbstractAssembler):
         engine: GreenFunctionBuilder,
         regularization_manager: RegularizationManager,
         lambda_spatial: float,
+        force_recompute: bool = False
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Assembles the system for a standard single-event inversion.
+        Assembles the system (A, b), reusing cached Green's functions if available.
+
+        Args:
+            faults: List of fault models.
+            datasets: List of geodetic datasets.
+            engine: Physics engine.
+            regularization_manager: Smoothing manager.
+            lambda_spatial: Regularization weight.
+            force_recompute: If True, clears cache and recalculates G.
         """
-        # 1.1. Collect all data and build the elastic Green's function matrix G
-        data_vector_d = []
+        
+        # 1. Check if we need to compute the Elastic Kernels (G)
+        if self._G_elastic_cache is None or force_recompute:
+            self._compute_elastic_kernels(faults, datasets, engine)
+
+        # 2. Apply Data Weights (Sigma)
+        # We do this every time because sigma might theoretically change (though rare),
+        # but the heavy lifting (calculating G) is already done.
         weighted_G_blocks = []
+        weighted_data_blocks = []
 
-        for dataset in datasets:
-            current_dataset_G_blocks = []
-            for fault in faults:
-                G_elastic_fault = engine.build_kernel(fault, dataset)
-                current_dataset_G_blocks.append(G_elastic_fault)
-
-            G_dataset = np.concatenate(current_dataset_G_blocks, axis=1)
-
+        for i, dataset in enumerate(datasets):
+            # Retrieve cached raw G for this dataset
+            G_raw = self._G_elastic_cache[i]
+            
             if dataset.sigma is None:
-                raise ValueError(
-                    f"Dataset '{dataset.name}' is missing uncertainty (sigma) information."
-                )
+                raise ValueError(f"Dataset '{dataset.name}' missing sigma.")
+            
+            # Inverse covariance (weighting)
+            # Flatten sigma if it's 1D, or handle full covariance if supported later
             sigma_inv = 1.0 / dataset.sigma
             
-            weighted_G_dataset = G_dataset * sigma_inv[:, np.newaxis]
-            weighted_data_d = dataset.data * sigma_inv
+            # Apply weighting: W * G
+            # Broadcasting: (N_data, 1) * (N_data, N_param)
+            G_weighted = G_raw * sigma_inv[:, np.newaxis]
+            d_weighted = dataset.data * sigma_inv
 
-            weighted_G_blocks.append(weighted_G_dataset)
-            data_vector_d.append(weighted_data_d)
+            weighted_G_blocks.append(G_weighted)
+            weighted_data_blocks.append(d_weighted)
 
+        # Stack the weighted blocks
         G_full_weighted = np.vstack(weighted_G_blocks)
-        d_full_weighted = np.concatenate(data_vector_d)
+        d_full_weighted = np.concatenate(weighted_data_blocks)
 
-        # 1.2. Build the regularization matrix S
-        S_reg = regularization_manager.build_smoothing_matrix(
-            faults, lambda_spatial
-        )
-
-        # 1.3. Assemble the augmented system
+        # 3. Build Regularization Matrix (S)
+        # This is fast relative to G, so we usually rebuild it to allow changing lambda
+        S_reg = regularization_manager.build_smoothing_matrix(faults, lambda_spatial)
+        
+        # 4. Assemble Final System
+        # Regularization targets are usually zero (smoothness)
         zero_reg_vector = np.zeros(S_reg.shape[0])
 
-        A_augmented = sparse_vstack([G_full_weighted, S_reg.toarray()]).toarray()
-        b_augmented = np.concatenate([d_full_weighted, zero_reg_vector])
+        # Combine Data equations and Regularization equations
+        # G_total = [ G_weighted ]
+        #           [ S_reg      ]
+        A_augmented = sparse_vstack([G_full_weighted, S_reg]).toarray()
         
+        # b_total = [ d_weighted ]
+        #           [ 0          ]
+        b_augmented = np.concatenate([d_full_weighted, zero_reg_vector])
+
         return A_augmented, b_augmented
+
+    def _compute_elastic_kernels(
+        self, 
+        faults: List[AbstractFaultModel], 
+        datasets: List[GeodeticDataSet], 
+        engine: GreenFunctionBuilder
+    ):
+        """
+        Internal method to compute raw G matrices and store them in cache.
+        This is the expensive step.
+        """
+        print("Computing elastic Green's functions (kernels)...")
+        self._G_elastic_cache = []
+        
+        for dataset in datasets:
+            # For a single dataset, G is [G_fault1 | G_fault2 | ...]
+            current_dataset_G_parts = []
+            
+            for fault in faults:
+                # Calculate G for this specific fault-dataset pair
+                # Shape: (N_data_points, N_fault_patches * components)
+                G_part = engine.build_kernel(fault, dataset)
+                current_dataset_G_parts.append(G_part)
+            
+            # Concatenate horizontally to get G for this dataset across all faults
+            G_dataset_full = np.concatenate(current_dataset_G_parts, axis=1)
+            self._G_elastic_cache.append(G_dataset_full)
+            
+        print("Green's functions computed and cached.")
+
+    def clear_cache(self):
+        """Manually clears the kernel cache."""
+        self._G_elastic_cache = None
 
 
 class InversionOrchestrator:
@@ -209,3 +269,84 @@ class InversionOrchestrator:
 
         # --- 3. Map Phase ---
         return SlipDistribution(solution_vector_m, self.faults)
+
+    def run_l_curve(
+        self,
+        lambdas: np.ndarray,
+        bounds: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+        force_recompute: bool = False,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Runs the inversion for a range of lambda values to generate an L-curve.
+
+        This method calculates the misfit (solution norm) and roughness (seminorm)
+        for each provided regularization parameter.
+
+        Args:
+            lambdas: An array of spatial regularization parameters to test.
+            bounds: Optional tuple of (lower_bounds, upper_bounds) for the solution.
+            force_recompute: If True, forces re-computation of the elastic kernels.
+
+        Returns:
+            A tuple containing:
+            - The array of lambdas used.
+            - The corresponding misfit array (rho).
+            - The corresponding roughness array (eta).
+        """
+        if not self.faults:
+            raise ValueError("No fault models added to the inversion.")
+        if not self.datasets:
+            raise ValueError("No geodetic datasets added to the inversion.")
+        if self.engine is None:
+            raise ValueError("No GreenFunctionBuilder engine has been set.")
+        if self.solver is None:
+            raise ValueError("No SolverStrategy has been set.")
+
+        misfits = []
+        roughnesses = []
+
+        # Ensure G is computed and cached before the loop
+        if force_recompute or self.assembler._G_elastic_cache is None:
+            self.assembler._compute_elastic_kernels(self.faults, self.datasets, self.engine)
+
+        num_data_points = sum(len(ds.data) for ds in self.datasets)
+
+        for lambda_val in lambdas:
+            # 1. Assemble the system for the current lambda
+            A_aug, b_aug = self.assembler.assemble(
+                self.faults,
+                self.datasets,
+                self.engine,
+                self._regularization_manager,
+                lambda_val,
+                force_recompute=False,  # Use cached G
+            )
+
+            # 2. Solve for the slip vector m
+            m = self.solver.solve(A_aug, b_aug, bounds)
+
+            # 3. Calculate misfit and roughness
+            G_weighted = A_aug[:num_data_points, :]
+            d_weighted = b_aug[:num_data_points]
+            
+            # The regularization part of the matrix
+            S_reg = A_aug[num_data_points:, :]
+
+            misfit = np.linalg.norm(G_weighted @ m - d_weighted)
+            
+            # Roughness is ||L*m||, but S_reg = lambda * L
+            # So, ||L*m|| = ||S_reg*m|| / lambda
+            if lambda_val > 0:
+                roughness = np.linalg.norm(S_reg @ m) / lambda_val
+            else:
+                # If lambda is zero, roughness is not well-defined in this context
+                # but can be considered as ||L*m|| where L is part of the matrix
+                # For simplicity, we can get L from the regularization manager
+                L_matrix = self._regularization_manager.build_smoothing_matrix(self.faults, 1.0)
+                roughness = np.linalg.norm(L_matrix @ m)
+
+
+            misfits.append(misfit)
+            roughnesses.append(roughness)
+
+        return np.array(lambdas), np.array(misfits), np.array(roughnesses)

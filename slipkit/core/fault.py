@@ -1,13 +1,54 @@
+import enum
 from abc import ABC, abstractmethod
 import numpy as np
-from typing import Tuple, Union, Dict, List, Set
+from typing import Tuple, Union, Dict, List
 import meshio
 from scipy.sparse import lil_matrix, csr_matrix
+
+
+class StrikeSlipType(enum.Enum):
+    """
+    Defines the strike-slip component of fault motion.
+    """
+    UNSPECIFIED = "unspecified"
+    RIGHT_LATERAL = "right_lateral"
+    LEFT_LATERAL = "left_lateral"
+
+    def __str__(self):
+        return self.value
+
+
+class DipSlipType(enum.Enum):
+    """
+    Defines the dip-slip component of fault motion.
+    """
+    UNSPECIFIED = "unspecified"
+    NORMAL = "normal"
+    REVERSE = "reverse"
+    THRUST = "thrust" # Alias for REVERSE motion
+
+    def __str__(self: str):
+        return self.value
+
 
 class AbstractFaultModel(ABC):
     """
     Abstract Base Class for any fault geometry.
     """
+    def __init__(
+        self,
+        strike_slip_type: StrikeSlipType = StrikeSlipType.UNSPECIFIED,
+        dip_slip_type: DipSlipType = DipSlipType.UNSPECIFIED
+    ):
+        """
+        Initializes the AbstractFaultModel with optional strike-slip and dip-slip types.
+
+        Args:
+            strike_slip_type: The primary strike-slip component of the fault's motion.
+            dip_slip_type: The primary dip-slip component of the fault's motion.
+        """
+        self.strike_slip_type = strike_slip_type
+        self.dip_slip_type = dip_slip_type
 
     @abstractmethod
     def num_patches(self) -> int:
@@ -43,14 +84,26 @@ class TriangularFaultMesh(AbstractFaultModel):
     Implementation for unstructured triangular meshes.
     """
 
-    def __init__(self, mesh_input: Union[str, Tuple[np.ndarray, np.ndarray]]):
+    def __init__(
+        self,
+        mesh_input: Union[str, Tuple[np.ndarray, np.ndarray]],
+        strike_slip_type: StrikeSlipType = StrikeSlipType.UNSPECIFIED,
+        dip_slip_type: DipSlipType = DipSlipType.UNSPECIFIED
+    ):
         """
         Initializes the TriangularFaultMesh from a file or raw arrays.
 
         Args:
             mesh_input: Path to a mesh file (e.g., .msh, .stl) or a tuple of
                         (vertices, faces) numpy arrays.
+            strike_slip_type: The primary strike-slip component of the fault's motion.
+            dip_slip_type: The primary dip-slip component of the fault's motion.
         """
+        super().__init__(
+            strike_slip_type=strike_slip_type,
+            dip_slip_type=dip_slip_type
+        )
+
         if isinstance(mesh_input, str):
             mesh = meshio.read(mesh_input)
             self.vertices: np.ndarray = mesh.points

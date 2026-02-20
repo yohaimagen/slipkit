@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import numpy as np
-from slipkit.core.fault import AbstractFaultModel, TriangularFaultMesh
+from slipkit.core.fault import AbstractFaultModel, TriangularFaultMesh, StrikeSlipType, DipSlipType
 from slipkit.core.data import GeodeticDataSet
 import cutde.halfspace as HS
 
@@ -37,10 +37,11 @@ class CutdeCpuEngine(GreenFunctionBuilder):
         self, fault: TriangularFaultMesh, dataset: GeodeticDataSet
     ) -> np.ndarray:
         """
-        Builds the Green's function matrix G using cutde.
+        Builds the Green's function matrix G using cutde, incorporating kinematic constraints.
 
         This matrix maps fault slip (strike-slip and dip-slip) to
-        displacements at observation points.
+        displacements at observation points. The signs of the Green's function
+        components are adjusted based on the fault's specified kinematic type.
 
         Args:
             fault: A TriangularFaultMesh object.
@@ -48,7 +49,7 @@ class CutdeCpuEngine(GreenFunctionBuilder):
 
         Returns:
             A numpy array of shape (N_data, 2 * M_patches) representing
-            the Green's function matrix.
+            the Green's function matrix, with signs adjusted for kinematic type.
         """
         obs_pts = dataset.coords
         
@@ -84,6 +85,13 @@ class CutdeCpuEngine(GreenFunctionBuilder):
             disp_mat[:, :, :, 1] * unit_vecs_expanded, axis=1
         )  # -> (N, M)
 
+        # Apply sign conventions based on kinematic type
+        if fault.strike_slip_type == StrikeSlipType.LEFT_LATERAL:
+            strike_slip_response *= -1
+
+        if fault.dip_slip_type == DipSlipType.NORMAL:
+            dip_slip_response *= -1
+            
         # Populate the G matrix
         # Columns 0 to M-1 are for strike-slip
         g_matrix[:, :n_patches] = strike_slip_response
