@@ -20,12 +20,13 @@ class GnssParser:
         origin_lon: float,
         origin_lat: float,
         name: str = "GNSS_Dataset",
-        components: List[str] = ['E', 'N', 'U']
+        components: List[str] = ['E', 'N', 'U'],
+        column_mapping: Optional[dict] = None
     ) -> GeodeticDataSet:
         """
         Reads a GNSS displacement CSV and converts it to a GeodeticDataSet.
 
-        Input CSV format: (Station, Lat, Lon, E, N, U, SigE, SigN, SigU)
+        Default CSV columns: (Station, Lat, Lon, E, N, U, SigE, SigN, SigU)
 
         Args:
             filepath: Path to the GNSS CSV file.
@@ -33,15 +34,28 @@ class GnssParser:
             origin_lat: Latitude of the local coordinate system origin.
             name: Identifier for the dataset.
             components: List of components to include ('E', 'N', 'U').
+            column_mapping: Dictionary to map expected columns to CSV columns.
+                Default: {'Station': 'Station', 'Lat': 'Lat', 'Lon': 'Lon', 
+                          'E': 'E', 'N': 'N', 'U': 'U', 
+                          'SigE': 'SigE', 'SigN': 'SigN', 'SigU': 'SigU'}
 
         Returns:
             GeodeticDataSet: Populated data container with local coordinates.
         """
         df = pd.read_csv(filepath)
         
+        # Default mapping
+        mapping = {
+            'Station': 'Station', 'Lat': 'Lat', 'Lon': 'Lon',
+            'E': 'E', 'N': 'N', 'U': 'U',
+            'SigE': 'SigE', 'SigN': 'SigN', 'SigU': 'SigU'
+        }
+        if column_mapping:
+            mapping.update(column_mapping)
+
         # Coordinate Conversion (WGS84 -> Local UTM)
-        lons = df['Lon'].values
-        lats = df['Lat'].values
+        lons = df[mapping['Lon']].values
+        lats = df[mapping['Lat']].values
 
         # UTM Projection setup (similar to InsarParser)
         utm_zone = int((origin_lon + 180) / 6) + 1
@@ -76,24 +90,26 @@ class GnssParser:
         unit_map = {
             'E': np.array([1.0, 0.0, 0.0]),
             'N': np.array([0.0, 1.0, 0.0]),
-            'U': np.array([0.0, 0.0, 1.0])
+            'U': np.array([0.0, 0.0, 1.0]) # TODO - consider if Up should be flipped to match greens function convention
         }
 
         for comp in components:
             if comp not in ['E', 'N', 'U']:
                 raise ValueError(f"Invalid component: {comp}")
             
-            sig_col = f"Sig{comp}"
+            sig_key = f"Sig{comp}"
+            csv_comp = mapping[comp]
+            csv_sig = mapping[sig_key]
             
             # coords
             all_coords.append(np.column_stack((local_x, local_y, local_z)))
             # data
-            all_data.append(df[comp].values)
+            all_data.append(df[csv_comp].values)
             # unit_vecs
             u_vec = unit_map[comp]
             all_unit_vecs.append(np.tile(u_vec, (num_stations, 1)))
             # sigma
-            all_sigma.append(df[sig_col].values)
+            all_sigma.append(df[csv_sig].values)
 
         # Combine everything
         coords_final = np.vstack(all_coords)
