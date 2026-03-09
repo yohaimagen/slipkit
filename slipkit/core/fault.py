@@ -154,6 +154,21 @@ class TriangularFaultMesh(AbstractFaultModel):
         """Returns the total number of sub-faults (M)."""
         return self.faces.shape[0]
 
+    def get_areas(self) -> np.ndarray:
+        """
+        Calculates and returns the area of each triangular patch.
+        
+        Returns:
+            A numpy array of shape (M,) containing the areas in square units.
+        """
+        v0 = self.vertices[self.faces[:, 0]]
+        v1 = self.vertices[self.faces[:, 1]]
+        v2 = self.vertices[self.faces[:, 2]]
+        
+        # Area = 0.5 * |(v1 - v0) x (v2 - v0)|
+        areas = 0.5 * np.linalg.norm(np.cross(v1 - v0, v2 - v0), axis=1)
+        return areas
+
     def get_mesh_geometry(self) -> Tuple[np.ndarray, np.ndarray]:
         """Returns vertices and faces."""
         return self.vertices, self.faces
