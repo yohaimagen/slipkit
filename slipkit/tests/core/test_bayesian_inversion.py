@@ -260,7 +260,7 @@ class TestAltarConfigBuilder:
     def test_build_contains_app_name(self, tmp_path):
         b = self._make_builder(tmp_path)
         pfg = b.build()
-        assert "slipmodel:" in pfg
+        assert "altar:" in pfg
 
     def test_patch_count_in_config(self, tmp_path):
         b = self._make_builder(tmp_path, n_patches=12)
@@ -303,7 +303,7 @@ class TestAltarConfigBuilder:
         assert os.path.isfile(path)
         with open(path) as f:
             content = f.read()
-        assert "slipmodel:" in content
+        assert "altar:" in content
 
 
 # ---------------------------------------------------------------------------

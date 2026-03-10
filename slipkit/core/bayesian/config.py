@@ -57,7 +57,7 @@ class AltarConfigBuilder:
         mw_mean: float,
         mw_sigma: float = 0.2,
         rigidity_gpa: float = 30.0,
-        app_name: str = "slipmodel",
+        app_name: str = "altar",
         green_file: str = "green.h5",
         data_file: str = "data.h5",
         cd_file: str = "cd.h5",

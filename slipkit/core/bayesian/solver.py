@@ -8,6 +8,7 @@ algorithm.
 
 import os
 import subprocess
+import sys
 import warnings
 from typing import Optional, Tuple
 
@@ -55,7 +56,7 @@ class AltarBayesianSolver(SolverStrategy):
         use_gpu: Whether to use the CUDA model and sampler.
         output_freq: Save results every this many beta steps.
         keep_work_dir: Retain the working directory after the run.
-        altar_cmd: Shell command used to invoke ALTar (default ``"slipmodel"``).
+        altar_cmd: Unused; kept for backward compatibility.
         last_result: The most recent ``AltarSlipDistribution`` from :meth:`solve`.
     """
 
@@ -78,7 +79,7 @@ class AltarBayesianSolver(SolverStrategy):
         use_gpu: bool = False,
         output_freq: int = 1,
         keep_work_dir: bool = True,
-        altar_cmd: str = "slipmodel",
+        altar_cmd: str = "altar",
     ) -> None:
         self.mw_mean = mw_mean
         self.mw_sigma = mw_sigma
@@ -235,38 +236,79 @@ class AltarBayesianSolver(SolverStrategy):
             gpu_precision=self.gpu_precision,
             output_dir=results_dir,
             output_freq=self.output_freq,
+            # Root key must match the application name in the launcher script.
+            app_name="slipmodel",
         )
         pfg_path = os.path.join(self.work_dir, "slipmodel.pfg")
         builder.save(pfg_path)
         return pfg_path
 
+    def _write_launcher_script(self) -> str:
+        """Writes a Python launcher script that starts the seismic ALTar app.
+
+        ``altar sample`` (the generic subcommand) does not activate the
+        seismic model's psets system — it only samples a single dummy
+        parameter.  Instead we generate a tiny application class that mirrors
+        the ALTar QuickStart pattern for custom models (e.g. the ``linear``
+        example).  Running this script with the current Python interpreter
+        properly initialises ``altar.models.seismic.static`` and all psets.
+
+        Returns:
+            Absolute path to the generated ``slipmodel.py`` launcher script.
+        """
+        use_gpu = self.use_gpu
+        if use_gpu:
+            model_family = "altar.models.seismic.cuda.static"
+            imports = "import altar\nimport altar.models.seismic\nimport altar.cuda"
+        else:
+            model_family = "altar.models.seismic.static"
+            imports = "import altar\nimport altar.models.seismic"
+
+        script = (
+            "#!/usr/bin/env python3\n"
+            f"{imports}\n"
+            "\n"
+            "class SlipModel(altar.shells.application,\n"
+            "                family='altar.applications.slipmodel'):\n"
+            f"    model = altar.models.model(default='{model_family}')\n"
+            "\n"
+            "app = SlipModel(name='slipmodel')\n"
+            "status = app.run()\n"
+            "raise SystemExit(status)\n"
+        )
+        launcher_path = os.path.join(self.work_dir, "slipmodel.py")
+        with open(launcher_path, "w") as fh:
+            fh.write(script)
+        return launcher_path
+
     def _run_altar(self, pfg_path: str) -> None:
-        """Invokes ALTar as a subprocess and monitors completion.
+        """Invokes ALTar via a Python launcher script and monitors completion.
+
+        We execute a generated ``slipmodel.py`` application with the current
+        Python interpreter rather than calling ``altar sample``.  The generic
+        ``altar sample`` subcommand only samples a single placeholder parameter
+        and does not load the seismic model's psets.  The launcher script
+        creates a proper ``SlipModel`` application whose default model is
+        ``altar.models.seismic.static``, which correctly activates all psets.
 
         Args:
             pfg_path: Absolute path to the ``.pfg`` configuration file.
 
         Raises:
-            RuntimeError: If the ``slipmodel`` command exits with a non-zero
-                return code or is not found on ``PATH``.
+            RuntimeError: If the Python launcher exits with a non-zero
+                return code.
         """
-        cmd = [self.altar_cmd, f"--config={pfg_path}"]
+        launcher_path = self._write_launcher_script()
+        cmd = [sys.executable, launcher_path, f"--config={pfg_path}"]
         print(f"Running ALTar: {' '.join(cmd)}")
 
-        try:
-            result = subprocess.run(
-                cmd,
-                cwd=self.work_dir,
-                capture_output=False,
-                text=True,
-                check=False,
-            )
-        except FileNotFoundError:
-            raise RuntimeError(
-                f"ALTar command '{self.altar_cmd}' not found on PATH.\n"
-                "Install ALTar and ensure the 'slipmodel' executable is "
-                "accessible. See https://altar.readthedocs.io for installation."
-            ) from None
+        result = subprocess.run(
+            cmd,
+            cwd=self.work_dir,
+            capture_output=False,
+            text=True,
+            check=False,
+        )
 
         if result.returncode != 0:
             raise RuntimeError(
