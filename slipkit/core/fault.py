@@ -1,9 +1,61 @@
 import enum
 from abc import ABC, abstractmethod
 import numpy as np
-from typing import Tuple, Union, Dict, List
+from typing import Tuple, Union, Dict, List, Sequence, Optional
 import meshio
 from scipy.sparse import lil_matrix, csr_matrix
+
+
+class SlipComponent(enum.Enum):
+    """
+    Identifies a slip component that a fault can invert for.
+
+    The value maps to the cutde slip dimension index used by the physics
+    engine (strike-slip -> 0, dip-slip -> 1).
+    """
+    STRIKE_SLIP = "strike_slip"
+    DIP_SLIP = "dip_slip"
+
+    def __str__(self):
+        return self.value
+
+    @classmethod
+    def coerce(cls, value: "Union[SlipComponent, str]") -> "SlipComponent":
+        """
+        Returns a SlipComponent from either a SlipComponent or a string alias.
+
+        Accepted string aliases (case-insensitive):
+            strike-slip: 'strike_slip', 'strike-slip', 'ss', 'strike'
+            dip-slip:    'dip_slip', 'dip-slip', 'ds', 'dip'
+        """
+        if isinstance(value, cls):
+            return value
+        key = str(value).lower()
+        aliases = {
+            "strike_slip": cls.STRIKE_SLIP,
+            "strike-slip": cls.STRIKE_SLIP,
+            "ss": cls.STRIKE_SLIP,
+            "strike": cls.STRIKE_SLIP,
+            "dip_slip": cls.DIP_SLIP,
+            "dip-slip": cls.DIP_SLIP,
+            "ds": cls.DIP_SLIP,
+            "dip": cls.DIP_SLIP,
+        }
+        if key in aliases:
+            return aliases[key]
+        raise ValueError(
+            f"Unknown slip component '{value}'. "
+            "Use 'strike_slip'/'ss' or 'dip_slip'/'ds'."
+        )
+
+
+# Canonical column/row ordering for slip components. The engine and the
+# regularization manager both lay components out in this order so that the
+# Green's-function columns and the smoothing-matrix rows always line up.
+CANONICAL_COMPONENT_ORDER: Tuple[SlipComponent, ...] = (
+    SlipComponent.STRIKE_SLIP,
+    SlipComponent.DIP_SLIP,
+)
 
 
 class StrikeSlipType(enum.Enum):
@@ -38,17 +90,69 @@ class AbstractFaultModel(ABC):
     def __init__(
         self,
         strike_slip_type: StrikeSlipType = StrikeSlipType.UNSPECIFIED,
-        dip_slip_type: DipSlipType = DipSlipType.UNSPECIFIED
+        dip_slip_type: DipSlipType = DipSlipType.UNSPECIFIED,
+        slip_components: Sequence[SlipComponent] = CANONICAL_COMPONENT_ORDER,
     ):
         """
-        Initializes the AbstractFaultModel with optional strike-slip and dip-slip types.
+        Initializes the AbstractFaultModel.
 
         Args:
-            strike_slip_type: The primary strike-slip component of the fault's motion.
+            strike_slip_type: The primary strike-slip component of the fault's
+                motion. Only used to set the *sign* of the strike-slip Green's
+                functions when strike-slip is an active component.
             dip_slip_type: The primary dip-slip component of the fault's motion.
+                Only used to set the *sign* of the dip-slip Green's functions
+                when dip-slip is an active component.
+            slip_components: Which slip components this fault inverts for. Defaults
+                to both strike-slip and dip-slip. Pass a single component (e.g.
+                ``[SlipComponent.STRIKE_SLIP]``) to invert for that component only,
+                which reduces the kernel/slip-vector width to ``M`` instead of
+                ``2M``.
         """
         self.strike_slip_type = strike_slip_type
         self.dip_slip_type = dip_slip_type
+        self._slip_components = self._validate_components(slip_components)
+
+    @staticmethod
+    def _validate_components(
+        slip_components: Sequence[SlipComponent],
+    ) -> Tuple[SlipComponent, ...]:
+        """Validates and canonicalizes the requested slip components."""
+        comps = tuple(slip_components)
+        if len(comps) == 0:
+            raise ValueError("slip_components must contain at least one SlipComponent.")
+        for c in comps:
+            if not isinstance(c, SlipComponent):
+                raise ValueError(
+                    f"slip_components entries must be SlipComponent, got {c!r}."
+                )
+        if len(set(comps)) != len(comps):
+            raise ValueError("slip_components must not contain duplicate entries.")
+        # Canonicalize order so the column layout is deterministic.
+        return tuple(c for c in CANONICAL_COMPONENT_ORDER if c in comps)
+
+    def active_components(self) -> Tuple[SlipComponent, ...]:
+        """Returns the active slip components in canonical column order."""
+        return self._slip_components
+
+    def num_components(self) -> int:
+        """Returns the number of active slip components (1 or 2)."""
+        return len(self._slip_components)
+
+    def component_slice(self, component: Union[SlipComponent, str]) -> Optional[slice]:
+        """
+        Returns the column/row `slice` for a component within this fault's block,
+        or None if the component is not active on this fault.
+
+        The slice indexes into this fault's local `(num_components * M)`-wide
+        block (strike-slip before dip-slip, following the canonical order).
+        """
+        component = SlipComponent.coerce(component)
+        if component not in self._slip_components:
+            return None
+        idx = self._slip_components.index(component)
+        n = self.num_patches()
+        return slice(idx * n, (idx + 1) * n)
 
     @abstractmethod
     def num_patches(self) -> int:
@@ -88,7 +192,8 @@ class TriangularFaultMesh(AbstractFaultModel):
         self,
         mesh_input: Union[str, Tuple[np.ndarray, np.ndarray]],
         strike_slip_type: StrikeSlipType = StrikeSlipType.UNSPECIFIED,
-        dip_slip_type: DipSlipType = DipSlipType.UNSPECIFIED
+        dip_slip_type: DipSlipType = DipSlipType.UNSPECIFIED,
+        slip_components: Sequence[SlipComponent] = CANONICAL_COMPONENT_ORDER,
     ):
         """
         Initializes the TriangularFaultMesh from a file or raw arrays.
@@ -98,10 +203,13 @@ class TriangularFaultMesh(AbstractFaultModel):
                         (vertices, faces) numpy arrays.
             strike_slip_type: The primary strike-slip component of the fault's motion.
             dip_slip_type: The primary dip-slip component of the fault's motion.
+            slip_components: Which slip components to invert for (see
+                :class:`AbstractFaultModel`). Defaults to strike-slip + dip-slip.
         """
         super().__init__(
             strike_slip_type=strike_slip_type,
-            dip_slip_type=dip_slip_type
+            dip_slip_type=dip_slip_type,
+            slip_components=slip_components,
         )
 
         if isinstance(mesh_input, str):
@@ -176,6 +284,29 @@ class TriangularFaultMesh(AbstractFaultModel):
     def get_centroids(self) -> np.ndarray:
         """Calculates and returns the centroids of each triangular patch."""
         return self.vertices[self.faces].mean(axis=1)
+
+    def deep_patch_indices(self, tol: float = 2.0) -> np.ndarray:
+        """
+        Returns the indices of the patches lying along the fault's deep edge.
+
+        A patch qualifies if it sits on the mesh boundary (fewer than three
+        neighbours) *and* its centroid is within ``tol`` of the deepest centroid
+        in the mesh. The boundary test keeps interior patches out on meshes whose
+        bottom edge is curved or tapered; the depth test keeps the rest of the
+        boundary (the surface trace and the lateral edges) out.
+
+        Args:
+            tol: Depth band above the deepest centroid, expressed in the mesh's
+                own length units (km for local UTM-km meshes).
+
+        Returns:
+            A ``(K,)`` integer array of patch indices, possibly empty.
+        """
+        depth = -self.get_centroids()[:, 2]  # z is negative downwards
+        on_boundary = np.array(
+            [len(self.adjacency[i]) < 3 for i in range(self.num_patches())]
+        )
+        return np.flatnonzero(on_boundary & (depth >= depth.max() - tol))
 
     def get_smoothing_matrix(self, type: str = 'laplacian') -> csr_matrix:
         """

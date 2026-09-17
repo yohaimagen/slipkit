@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-from slipkit.core.fault import TriangularFaultMesh
+from slipkit.core.fault import TriangularFaultMesh, SlipComponent
 from slipkit.core.data import GeodeticDataSet
 from slipkit.core.physics import CutdeCpuEngine
 
@@ -27,7 +27,8 @@ class GreenFunctionVisualizer:
             fault: The fault model.
             dataset: The geodetic dataset with observation points.
             patch_idx: The index of the fault patch to visualize.
-            slip_component: The slip component, either 'strike' or 'dip'.
+            slip_component: The slip component, either 'strike' or 'dip' (or any
+                            SlipComponent alias). Must be active on the fault.
             engine: The physics engine to compute the Green's function.
             ax: A matplotlib axes object to plot on. If None, a new one is created.
             save_to: If not None, the path to save the figure to.
@@ -41,14 +42,17 @@ class GreenFunctionVisualizer:
         if not 0 <= patch_idx < n_patches:
             raise ValueError(f"patch_idx must be between 0 and {n_patches - 1}.")
 
-        g_matrix = engine.build_kernel(fault, dataset)
+        component = SlipComponent.coerce(slip_component)
+        col_slice = fault.component_slice(component)
+        if col_slice is None:
+            active = [str(c) for c in fault.active_components()]
+            raise ValueError(
+                f"Component '{component}' is not active on this fault. "
+                f"Active components: {active}."
+            )
 
-        if slip_component == 'strike':
-            displacements = g_matrix[:, patch_idx]
-        elif slip_component == 'dip':
-            displacements = g_matrix[:, n_patches + patch_idx]
-        else:
-            raise ValueError("slip_component must be 'strike' or 'dip'.")
+        g_matrix = engine.build_kernel(fault, dataset)
+        displacements = g_matrix[:, col_slice.start + patch_idx]
 
         x = dataset.coords[:, 0]
         y = dataset.coords[:, 1]
@@ -69,7 +73,7 @@ class GreenFunctionVisualizer:
                 'k-', lw=2
             )
 
-        ax.set_title(f'Displacement Field for Patch {patch_idx} ({slip_component}-slip)')
+        ax.set_title(f'Displacement Field for Patch {patch_idx} ({component})')
         ax.set_xlabel('X coordinate (m)')
         ax.set_ylabel('Y coordinate (m)')
         ax.set_aspect('equal', 'box')
@@ -96,8 +100,9 @@ class GreenFunctionVisualizer:
         Args:
             fault: The fault model.
             dataset: The geodetic dataset.
-            slip_distribution: A (2M,) numpy array with strike-slip values
-                               followed by dip-slip values.
+            slip_distribution: A ``(num_components * M,)`` numpy array with one
+                               per-component block (canonical order: strike-slip
+                               before dip-slip).
             engine: The physics engine.
             ax: A matplotlib axes object. If None, one is created.
             save_to: Path to save the figure to.
@@ -108,8 +113,9 @@ class GreenFunctionVisualizer:
             fig = ax.get_figure()
 
         n_patches = fault.num_patches()
-        if slip_distribution.shape != (2 * n_patches,):
-            raise ValueError(f"slip_distribution must have shape ({2 * n_patches},).")
+        expected = fault.num_components() * n_patches
+        if slip_distribution.shape != (expected,):
+            raise ValueError(f"slip_distribution must have shape ({expected},).")
 
         g_matrix = engine.build_kernel(fault, dataset)
         total_displacement = g_matrix @ slip_distribution

@@ -2,8 +2,12 @@ import numpy as np
 import pytest
 import warnings
 from scipy.sparse import issparse, block_diag, csr_matrix
-from slipkit.core.fault import TriangularFaultMesh
-from slipkit.core.regularization import LaplacianSmoothing, RegularizationManager
+from slipkit.core.fault import TriangularFaultMesh, SlipComponent
+from slipkit.core.regularization import (
+    LaplacianSmoothing,
+    RegularizationManager,
+    DeepEdgeDamping,
+)
 
 @pytest.fixture
 def simple_fault_mesh():
@@ -146,6 +150,28 @@ def test_laplacian_smoothing_no_faults():
     assert smoothing_matrix.shape == (0, 0)
     assert smoothing_matrix.nnz == 0
 
+def test_laplacian_smoothing_single_component(simple_fault_mesh):
+    """
+    A single-component fault yields an (M, M) smoothing matrix equal to lambda*L
+    (no duplicated block).
+    """
+    vertices = np.array([
+        [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 0.0],
+    ])
+    faces = np.array([[0, 1, 2], [1, 3, 2]])
+    fault = TriangularFaultMesh(
+        (vertices, faces), slip_components=[SlipComponent.STRIKE_SLIP]
+    )
+
+    lambda_spatial = 0.5
+    S = LaplacianSmoothing().build_smoothing_matrix([fault], lambda_spatial)
+
+    m = fault.num_patches()
+    assert S.shape == (m, m)  # not 2M
+    expected = lambda_spatial * fault.get_smoothing_matrix().toarray()
+    assert np.allclose(S.toarray(), expected)
+
+
 def test_abstract_regularization_manager_instantiation():
     """Verify that RegularizationManager cannot be instantiated directly."""
     expected_regex = (
@@ -154,3 +180,93 @@ def test_abstract_regularization_manager_instantiation():
     )
     with pytest.raises(TypeError, match=expected_regex):
         RegularizationManager()
+
+
+@pytest.fixture
+def dipping_fault_mesh():
+    """A 4-triangle strip dipping down-dip in +y, spanning depths 0 to 2."""
+    vertices = np.array([
+        [0.0, 0.0,  0.0],  # 0
+        [1.0, 0.0,  0.0],  # 1
+        [0.0, 1.0, -1.0],  # 2
+        [1.0, 1.0, -1.0],  # 3
+        [0.0, 2.0, -2.0],  # 4
+        [1.0, 2.0, -2.0],  # 5
+    ])
+    faces = np.array([
+        [0, 1, 2],  # f0, centroid depth 0.333
+        [1, 3, 2],  # f1, centroid depth 0.667
+        [2, 3, 4],  # f2, centroid depth 1.333
+        [3, 5, 4],  # f3, centroid depth 1.667
+    ])
+    return TriangularFaultMesh((vertices, faces))
+
+
+def test_deep_patch_indices_selects_deepest_band(dipping_fault_mesh):
+    """Only patches within `tol` of the deepest centroid are selected."""
+    np.testing.assert_array_equal(
+        dipping_fault_mesh.deep_patch_indices(tol=0.1), [3]
+    )
+    np.testing.assert_array_equal(
+        dipping_fault_mesh.deep_patch_indices(tol=0.5), [2, 3]
+    )
+
+
+def test_deep_edge_damping_appends_rows_for_all_active_components(dipping_fault_mesh):
+    """One damped row per deep patch per active component, at alpha * lambda."""
+    fault, alpha, lam = dipping_fault_mesh, 3.0, 2.0
+    manager = DeepEdgeDamping(alpha=alpha, tol=0.5)
+    deep = fault.deep_patch_indices(tol=0.5)  # [2, 3]
+
+    s_base = LaplacianSmoothing().build_smoothing_matrix([fault], lam)
+    s_full = manager.build_smoothing_matrix([fault], lam).toarray()
+
+    n_extra = len(deep) * fault.num_components()  # 2 patches x (ss, ds)
+    assert s_full.shape == (s_base.shape[0] + n_extra, s_base.shape[1])
+    # The base block is untouched.
+    np.testing.assert_allclose(s_full[:s_base.shape[0]], s_base.toarray())
+
+    # Each extra row damps exactly one column, and both components are covered.
+    extra = s_full[s_base.shape[0]:]
+    assert np.count_nonzero(extra) == n_extra
+    expected_cols = sorted(
+        list(deep) + list(deep + fault.num_patches())
+    )
+    np.testing.assert_array_equal(sorted(np.nonzero(extra)[1]), expected_cols)
+    np.testing.assert_allclose(extra[extra != 0], alpha * lam)
+
+
+def test_deep_edge_damping_single_component_fault(dipping_fault_mesh):
+    """A fault solving for one component only gets that component damped."""
+    verts, faces = dipping_fault_mesh.get_mesh_geometry()
+    fault = TriangularFaultMesh(
+        (verts, faces), slip_components=[SlipComponent.DIP_SLIP]
+    )
+    manager = DeepEdgeDamping(alpha=1.0, tol=0.5)
+    cols = manager.constrained_columns([fault])
+    # Single-component block: columns are the patch indices themselves.
+    np.testing.assert_array_equal(cols, fault.deep_patch_indices(tol=0.5))
+
+
+def test_deep_edge_damping_component_subset_and_offsets(dipping_fault_mesh):
+    """`components` restricts damping; multi-fault columns are globally offset."""
+    fault = dipping_fault_mesh
+    manager = DeepEdgeDamping(alpha=1.0, tol=0.5, components=["ds"])
+    deep = fault.deep_patch_indices(tol=0.5)
+    m = fault.num_patches()
+
+    np.testing.assert_array_equal(manager.constrained_columns([fault]), deep + m)
+    # Second fault's columns are shifted by the first fault's block width.
+    np.testing.assert_array_equal(
+        manager.constrained_columns([fault, fault]),
+        np.concatenate([deep + m, deep + m + fault.num_components() * m]),
+    )
+
+
+def test_deep_edge_damping_disabled_matches_base(dipping_fault_mesh):
+    """alpha = 0 leaves the base regularization untouched."""
+    base = LaplacianSmoothing().build_smoothing_matrix([dipping_fault_mesh], 1.0)
+    damped = DeepEdgeDamping(alpha=0.0).build_smoothing_matrix(
+        [dipping_fault_mesh], 1.0
+    )
+    np.testing.assert_allclose(damped.toarray(), base.toarray())
