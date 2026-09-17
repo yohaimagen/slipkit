@@ -104,6 +104,14 @@ data/
 docs/_build/
 site/
 
+# Local planning notes and assistant context
+GEMINI.md
+ALTAR_COMPATIBILITY_ANALYSIS_AND_PLAN.md
+altar_integration_plan.md
+ramp_estimation_plan.md
+resolution_analysis_plan.md
+slip_component_selection_plan.md
+
 # Build artifacts
 *.o
 *.a
@@ -151,4 +159,3 @@ Thumbs.db
 
 *.png
 /test_notebooks/
-

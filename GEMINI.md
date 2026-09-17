@@ -55,7 +55,7 @@ A generic container for observed displacements. It is agnostic to the source (In
 
 * **Methods:**
 
-  * `get_nuisance_basis()`: Returns `None` for V1. Future-proof hook for InSAR orbital ramps (returning matrix of shape `(N, k)`).
+  * `get_nuisance_basis()`: Returns the `(N, P)` design matrix of this dataset's nuisance `Ramp` (InSAR orbital ramp), or `None` if it has none. Ramp coefficients are solved jointly with slip and returned in `SlipDistribution.nuisance`.
 
   * `__len__()`: Returns $N$.
 
@@ -280,6 +280,25 @@ The user-facing API that ties everything together.
 2. Add Visualization tools.
 
 3. Write Unit Tests for all core modules.
+
+### 6.1. Resolution & Uncertainty (implemented)
+
+For the **linear backend only** (`NnlsSolver` / `BoundedLsqSolver` with Laplacian
+regularization):
+
+* **`core.noise`** — per-dataset `NoiseModel` (`DiagonalNoise` for reported
+  sigma; `EmpiricalInsarNoise.from_quiet_region` fits amplitude + exponential
+  spatial correlation from a quiet region). Feeds `Sigma`, `C_m`, and the MC draws.
+* **`core.resolution.ResolutionAnalyzer`** — analytical generalized inverse `G_g`,
+  model resolution `R`, covariance `C_m`, resolution diagonal, Backus–Gilbert
+  spread length, `sigma_m`, cross-component leakage, and optional TSVD/Picard.
+  Built via `from_orchestrator` (reuses the `run_l_curve` extraction; no
+  assembler change).
+* **`core.resolution.SyntheticRecoveryTest` / `MonteCarloResolution`** —
+  checkerboard/target/PSF recovery and MC/jackknife/bootstrap ensembles through
+  the real solver+bounds (parallelized like `run_l_curve`). The MC ensemble is
+  the authoritative bound-respecting uncertainty.
+* **`utils.visualizers.ResolutionVisualizer`** — fault-plane maps of every product.
 
 ## 7. Future Roadmap
 
