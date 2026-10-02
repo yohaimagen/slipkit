@@ -1,334 +1,323 @@
-"""
-ALTar Bayesian solver strategy.
-
-Orchestrates data export, configuration generation, ALTar subprocess execution,
-and result import for a full static Bayesian slip inversion via the CATMIP
-algorithm.
-"""
-
+"""Serial CPU AlTar execution with explicit priors and isolated run provenance."""
+import hashlib
+import inspect
+import json
 import os
+import platform
+import shutil
+import signal
 import subprocess
 import sys
+import tempfile
+import time
 import warnings
-from typing import Optional, Tuple
-
 import numpy as np
-
+from scipy.linalg import cho_solve, solve_triangular
 from slipkit.core.solvers import SolverStrategy
-from slipkit.core.bayesian.config import AltarConfigBuilder
-from slipkit.core.bayesian.exporter import AltarDataExporter
-from slipkit.core.bayesian.importer import AltarResultImporter
-from slipkit.core.bayesian.results import AltarSlipDistribution
+from .config import AltarConfigBuilder
+from .exporter import AltarDataExporter
+from .importer import AltarResultImporter
+from .problem import AltarProblem, file_hash
 
 
 class AltarBayesianSolver(SolverStrategy):
-    """Bayesian slip inversion solver backed by ALTar's CATMIP algorithm.
-
-    This solver receives the assembled Green's function matrix and data vector
-    from :class:`~slipkit.core.bayesian.assembler.AltarAssembler`, exports
-    them to HDF5 files, generates an ALTar ``.pfg`` configuration file, runs
-    ALTar as a subprocess, and imports the posterior samples into an
-    :class:`~slipkit.core.bayesian.results.AltarSlipDistribution`.
-
-    **Expected input layout from** ``AltarAssembler``::
-
-        A — shape (N_obs, 2 * M_patches) : [G_ss | G_ds]
-        b — shape (2 * N_obs,)           : [d_obs | sigma]
-
-    The ``bounds`` argument accepted by :meth:`solve` is ignored; slip bounds
-    are controlled by the prior distributions in the ``.pfg`` configuration.
-
-    Attributes:
-        mw_mean: Mean moment magnitude used for Dirichlet seeding.
-        mw_sigma: Standard deviation of moment magnitude for seeding.
-        areas_m2: Patch areas in m² ``(M,)``.
-        work_dir: Working directory for all ALTar I/O.
-        alpha_cp: Fractional model error for static Cp (0 = disabled).
-        ss_prior_sigma: Sigma of Gaussian prior on strike-slip.
-        ds_prior_support: ``(lower, upper)`` uniform prior bounds on dip-slip.
-        n_ramp_params: Number of InSAR ramp parameters (0 = disabled).
-        chains: Markov chains per ALTar task.
-        steps: Metropolis burn-in steps per beta step.
-        tasks: MPI tasks per host.
-        hosts: Number of MPI hosts.
-        gpus: GPUs per task.
-        gpu_precision: ``"float32"`` or ``"float64"``.
-        use_gpu: Whether to use the CUDA model and sampler.
-        output_freq: Save results every this many beta steps.
-        keep_work_dir: Retain the working directory after the run.
-        altar_cmd: Unused; kept for backward compatibility.
-        last_result: The most recent ``AltarSlipDistribution`` from :meth:`solve`.
-    """
-
-    def __init__(
-        self,
-        mw_mean: float,
-        mw_sigma: float,
-        areas_m2: np.ndarray,
-        work_dir: str = "./altar_run",
-        alpha_cp: float = 0.0,
-        ss_prior_sigma: float = 0.5,
-        ds_prior_support: Tuple[float, float] = (-0.5, 20.0),
-        n_ramp_params: int = 0,
-        chains: int = 2**10,
-        steps: int = 1000,
-        tasks: int = 1,
-        hosts: int = 1,
-        gpus: int = 1,
-        gpu_precision: str = "float32",
-        use_gpu: bool = False,
-        output_freq: int = 1,
-        keep_work_dir: bool = True,
-        altar_cmd: str = "altar",
-    ) -> None:
-        self.mw_mean = mw_mean
-        self.mw_sigma = mw_sigma
-        self.areas_m2 = areas_m2
+    def __init__(self, work_dir='./altar_run', alpha_cp=0., ss_prior_sigma=None,
+                 chains=1024, steps=1000, tasks=1, output_freq=1, keep_work_dir=True,
+                 *, prior='gaussian', prior_scales=None, prior_mean=None, seed=17,
+                 output_dir='results', timeout=3600., launcher=None, cp_policy='fixed',
+                 initial_scaling=.1, acceptance_weight=8/9, rejection_weight=1/9, cpu_kernel='native'):
+        if prior_scales is not None and ss_prior_sigma is not None:
+            raise ValueError('Supply prior_scales or legacy ss_prior_sigma, not both.')
+        if prior not in ('gaussian', 'uniform'):
+            raise ValueError('Only Gaussian and independent finite uniform priors are supported.')
+        if prior == 'uniform' and any(v is not None for v in (prior_scales, prior_mean, ss_prior_sigma)):
+            raise ValueError('Gaussian prior controls do not apply to a uniform prior.')
+        if cp_policy != 'fixed':
+            raise ValueError('Only fixed observation-based Cp is supported; stage/proposal updates are unsupported.')
+        if not np.isfinite(alpha_cp) or alpha_cp < 0:
+            raise ValueError('alpha_cp must be finite and nonnegative.')
+        if not np.isfinite(timeout) or timeout <= 0:
+            raise ValueError('timeout must be finite and positive.')
+        if os.path.isabs(output_dir) or '..' in output_dir.split(os.sep) or output_dir.split(os.sep)[0] in ('', '.', 'case', 'linear.pfg', 'manifest.json', 'sampler.log', 'physical_problem.npz', 'prior_transform.npz', 'progress.json', 'progress.tmp', 'numerical-parity.json', 'gpu-process.json', 'stage_targets.json', 'host-resource.txt'):
+            raise ValueError('output_dir must name a relative directory within each isolated run.')
+        if cpu_kernel not in ('native', 'vectorized') or (cpu_kernel == 'vectorized' and launcher is not None):
+            raise ValueError('cpu_kernel must be native or vectorized; vectorized uses its own explicit launcher.')
+        self.cpu_kernel = cpu_kernel
+        self.initial_scaling, self.acceptance_weight, self.rejection_weight = initial_scaling, acceptance_weight, rejection_weight
         self.work_dir = os.path.abspath(work_dir)
-        self.alpha_cp = alpha_cp
-        self.ss_prior_sigma = ss_prior_sigma
-        self.ds_prior_support = ds_prior_support
-        self.n_ramp_params = n_ramp_params
-        self.chains = chains
-        self.steps = steps
-        self.tasks = tasks
-        self.hosts = hosts
-        self.gpus = gpus
-        self.gpu_precision = gpu_precision
-        self.use_gpu = use_gpu
-        self.output_freq = output_freq
-        self.keep_work_dir = keep_work_dir
-        self.altar_cmd = altar_cmd
-        self.last_result: Optional[AltarSlipDistribution] = None
+        self.alpha_cp, self.prior, self.cp_policy = alpha_cp, prior, cp_policy
+        self.prior_scales = prior_scales if prior_scales is not None else (.5 if ss_prior_sigma is None else ss_prior_sigma)
+        self.prior_mean = 0. if prior_mean is None else prior_mean
+        self.chains, self.steps, self.tasks = chains, steps, tasks
+        self.seed, self.output_dir, self.output_freq = seed, output_dir, output_freq
+        self.keep_work_dir, self.timeout, self.launcher = keep_work_dir, timeout, launcher
+        self.last_posterior = self.last_result = self.last_run_path = self.last_problem = self.last_manifest = None
+        # Validate execution options without creating files.
+        AltarConfigBuilder(1, 1, '.', chains, steps, tasks, output_dir, output_freq, seed, prior, initial_scaling, acceptance_weight, rejection_weight)
+        if chains < 2:
+            raise ValueError('At least two particles are required.')
 
-    # ------------------------------------------------------------------
-    # SolverStrategy interface
-    # ------------------------------------------------------------------
+    def reset(self):
+        self.last_posterior = self.last_result = self.last_run_path = self.last_problem = self.last_manifest = None
 
-    def solve(
-        self,
-        A: np.ndarray,
-        b: np.ndarray,
-        bounds: Optional[Tuple[np.ndarray, np.ndarray]] = None,
-    ) -> np.ndarray:
-        """Runs the full ALTar Bayesian inversion pipeline.
+    def get_last_posterior(self):
+        return self.last_posterior
 
-        Args:
-            A: Assembled Green's function matrix ``[G_ss | G_ds]``,
-               shape ``(N_obs, 2 * M_patches)``.
-            b: Assembled data vector ``[d_obs | sigma]``,
-               shape ``(2 * N_obs,)``.
-            bounds: Ignored; present for interface compatibility.
-
-        Returns:
-            Posterior mean slip vector of shape ``(2 * M_patches,)``
-            ordered as ``[mean_ss | mean_ds]``.
-
-        Raises:
-            ValueError: If array dimensions are inconsistent.
-            RuntimeError: If ALTar exits with a non-zero return code.
-        """
-        n_obs, n_param = A.shape
-        n_patches = n_param // 2
-
-        if n_param % 2 != 0:
-            raise ValueError(
-                f"Expected A with an even number of columns (2*M_patches), "
-                f"got {n_param}."
-            )
-        if len(b) != 2 * n_obs:
-            raise ValueError(
-                f"Expected b of length 2*N_obs={2 * n_obs}, got {len(b)}."
-            )
-        if len(self.areas_m2) != n_patches:
-            raise ValueError(
-                f"areas_m2 has {len(self.areas_m2)} entries but A implies "
-                f"{n_patches} patches."
-            )
-
-        G = A
-        d_obs = b[:n_obs]
-        sigma = b[n_obs:]
-
-        os.makedirs(self.work_dir, exist_ok=True)
-        case_dir = os.path.join(self.work_dir, "case")
-        results_dir = os.path.join(self.work_dir, "results")
-        os.makedirs(case_dir, exist_ok=True)
-
-        self._export_data(G, d_obs, sigma, case_dir)
-        pfg_path = self._write_config(n_patches, n_obs, case_dir, results_dir)
-        self._run_altar(pfg_path)
-        result = self._import_results(results_dir, n_patches)
-
-        self.last_result = result
-        return result.get_mean_slip()
-
-    # ------------------------------------------------------------------
-    # Accessor
-    # ------------------------------------------------------------------
-
-    def get_last_result(self) -> Optional[AltarSlipDistribution]:
-        """Returns the ``AltarSlipDistribution`` from the most recent run.
-
-        Returns:
-            The last result object, or ``None`` if :meth:`solve` has not
-            been called yet.
-        """
+    def get_last_result(self):
+        """Geometry-aware result exists only after an orchestrated inversion."""
         return self.last_result
 
-    # ------------------------------------------------------------------
-    # Private pipeline steps
-    # ------------------------------------------------------------------
-
-    def _export_data(
-        self,
-        G: np.ndarray,
-        d_obs: np.ndarray,
-        sigma: np.ndarray,
-        case_dir: str,
-    ) -> None:
-        """Exports Green's functions, data, covariance, and areas to HDF5.
-
-        Args:
-            G: Green's function matrix ``(N_obs, 2 * M)``.
-            d_obs: Observations vector ``(N_obs,)``.
-            sigma: Diagonal uncertainties ``(N_obs,)``.
-            case_dir: Directory to write ALTar input files.
-        """
-        exporter = AltarDataExporter(case_dir)
-        exporter.export_all(G, d_obs, sigma, self.areas_m2, self.alpha_cp)
-
-    def _write_config(
-        self,
-        n_patches: int,
-        n_obs: int,
-        case_dir: str,
-        results_dir: str,
-    ) -> str:
-        """Generates and saves the ALTar ``.pfg`` configuration file.
-
-        Args:
-            n_patches: Number of fault patches.
-            n_obs: Number of observations.
-            case_dir: Directory containing ALTar input files.
-            results_dir: Directory where ALTar writes output.
-
-        Returns:
-            Absolute path to the written ``.pfg`` file.
-        """
-        areas_km2 = self.areas_m2 / 1e6
-        builder = AltarConfigBuilder(
-            n_patches=n_patches,
-            n_observations=n_obs,
-            case_dir=case_dir,
-            areas_km2=areas_km2,
-            mw_mean=self.mw_mean,
-            mw_sigma=self.mw_sigma,
-            ss_prior_sigma=self.ss_prior_sigma,
-            ds_prior_support=self.ds_prior_support,
-            n_ramp_params=self.n_ramp_params,
-            use_gpu=self.use_gpu,
-            chains=self.chains,
-            steps=self.steps,
-            tasks=self.tasks,
-            hosts=self.hosts,
-            gpus=self.gpus,
-            gpu_precision=self.gpu_precision,
-            output_dir=results_dir,
-            output_freq=self.output_freq,
-            # Root key must match the application name in the launcher script.
-            app_name="slipmodel",
-        )
-        pfg_path = os.path.join(self.work_dir, "slipmodel.pfg")
-        builder.save(pfg_path)
-        return pfg_path
-
-    def _write_launcher_script(self) -> str:
-        """Writes a Python launcher script that starts the seismic ALTar app.
-
-        ``altar sample`` (the generic subcommand) does not activate the
-        seismic model's psets system — it only samples a single dummy
-        parameter.  Instead we generate a tiny application class that mirrors
-        the ALTar QuickStart pattern for custom models (e.g. the ``linear``
-        example).  Running this script with the current Python interpreter
-        properly initialises ``altar.models.seismic.static`` and all psets.
-
-        Returns:
-            Absolute path to the generated ``slipmodel.py`` launcher script.
-        """
-        use_gpu = self.use_gpu
-        if use_gpu:
-            model_family = "altar.models.seismic.cuda.static"
-            imports = "import altar\nimport altar.models.seismic\nimport altar.cuda"
+    def save_result(self, path, problem=None, *, faults=(), datasets=(), length_unit='km'):
+        """Explicit durable bundle for either solver, including actual prior settings."""
+        from .artifact import save_inference
+        if self.last_posterior is None:
+            raise ValueError('No posterior is available to save.')
+        problem = self.last_problem if problem is None else problem
+        prior = dict(kind=self.prior)
+        if self.prior == 'gaussian':
+            prior.update(anchor_mean=np.broadcast_to(self.prior_mean, (problem.G.shape[1],)),
+                         scales=np.broadcast_to(self.prior_scales, (problem.G.shape[1],)))
         else:
-            model_family = "altar.models.seismic.static"
-            imports = "import altar\nimport altar.models.seismic"
+            offset, widths = self.last_prior_transform
+            prior.update(lower=offset.tolist(), upper=(offset+widths).tolist())
+        return save_inference(path, problem, self.last_posterior, prior=prior,
+            alpha_cp=self.alpha_cp, seed=self.seed, faults=faults, datasets=datasets,
+            length_unit=length_unit, inference_settings=self.last_manifest)
 
-        script = (
-            "#!/usr/bin/env python3\n"
-            f"{imports}\n"
-            "\n"
-            "class SlipModel(altar.shells.application,\n"
-            "                family='altar.applications.slipmodel'):\n"
-            f"    model = altar.models.model(default='{model_family}')\n"
-            "\n"
-            "app = SlipModel(name='slipmodel')\n"
-            "status = app.run()\n"
-            "raise SystemExit(status)\n"
+    def solve(self, A, b, bounds=None):
+        """Legacy matrix adapter: b=[raw observations, positive sigma]."""
+        self.reset()
+        a, packed = np.asarray(A, dtype=float), np.asarray(b, dtype=float)
+        if a.ndim != 2 or packed.shape != (2*a.shape[0],):
+            raise ValueError('Expected A=(N_obs,N_param) and b=[data|sigma] with 2*N_obs entries.')
+        n = a.shape[0]
+        sigma = packed[n:]
+        if not np.isfinite(sigma).all() or np.any(sigma <= 0):
+            raise ValueError('sigma must be finite and strictly positive.')
+        return self.solve_problem(AltarProblem(a, packed[:n], sigma**2), bounds)
+
+    def _transform(self, problem, bounds):
+        p = problem.G.shape[1]
+        if self.prior == 'uniform':
+            if bounds is None:
+                raise ValueError('Uniform prior requires explicit finite lower and upper bounds.')
+            if problem.smoothing is not None and np.any(problem.smoothing):
+                raise ValueError('Uniform bounds with Gaussian smoothing are not supported.')
+            if np.any(np.asarray(self.prior_mean) != 0) or np.any(np.asarray(self.prior_scales) != .5):
+                raise ValueError('Gaussian prior_mean/scales do not apply to a uniform prior.')
+            lo, hi = (np.broadcast_to(np.asarray(v, dtype=float), (p,)).copy() for v in bounds)
+            if not np.isfinite(lo).all() or not np.isfinite(hi).all() or np.any(hi <= lo):
+                raise ValueError('Uniform bounds must be finite and strictly increasing; fixed parameters are unsupported.')
+            return lo, hi-lo
+        if bounds is not None:
+            lo, hi = (np.broadcast_to(np.asarray(v, dtype=float), (p,)) for v in bounds)
+            if not (np.all(np.isneginf(lo)) and np.all(np.isposinf(hi))):
+                raise ValueError('Bounded Gaussian priors are unsupported; choose uniform explicitly for a uniform box prior.')
+        scales = np.broadcast_to(np.asarray(self.prior_scales, dtype=float), (p,))
+        mean = np.broadcast_to(np.asarray(self.prior_mean, dtype=float), (p,))
+        if not np.isfinite(scales).all() or np.any(scales <= 0) or not np.isfinite(mean).all():
+            raise ValueError('Gaussian means must be finite and scales finite and positive.')
+        if problem.smoothing is None or not np.any(problem.smoothing):
+            return mean.copy(), scales.copy()
+        anchor = scales**-2
+        q = np.diag(anchor)
+        if problem.smoothing is not None:
+            q += problem.smoothing.T @ problem.smoothing
+        r = np.linalg.cholesky(q).T
+        offset = cho_solve((r, False), anchor*mean)
+        matrix = solve_triangular(r, np.eye(p))
+        return offset, matrix
+
+    def _preflight(self):
+        """The local native model contract is checked before exporting inputs."""
+        try:
+            import altar
+            import pyre
+            from altar.models.linear.Linear import Linear
+            from altar.distributions.Uniform import Uniform
+            from altar.distributions.Gaussian import Gaussian
+            from altar.bayesian.Recorder import Recorder
+            from altar.norms.L2 import L2
+            from altar.bayesian.Metropolis import Metropolis
+        except ImportError as exc:
+            raise RuntimeError('CPU AlTar/Pyre native framework is unavailable in this Python environment.') from exc
+        binary = self.launcher or shutil.which('linear', path=os.path.dirname(sys.executable)) or shutil.which('linear')
+        if binary is None or not os.path.isfile(binary):
+            raise RuntimeError("AlTar 'linear' launcher not found; use the native AlTar/Pyre environment.")
+        hashes = {}
+        for cls in (Linear, Uniform, Gaussian, Recorder, L2, Metropolis):
+            path = inspect.getfile(cls)
+            with open(path, 'rb') as stream:
+                hashes[cls.__name__] = hashlib.sha256(stream.read()).hexdigest()
+        expected = dict(
+            Linear='63a9cbb73c2c49308df466e129ad8a1f3d65745fa8423763118ea19a810d129e',
+            Uniform='92aeb08f391bdd427f3faa5f316dc13a5b349959d0e7305f30a576c4532d39c0',
+            Gaussian='f35b1c946d307a678c0973f819be169cddd12f6130cfae7ac79c448a04572ef9',
+            L2='c45ab5a7c9bbf4a7dcb54dcdc360aaf8b4d491960c4e0bb4826be2953fdead14',
+            Metropolis='e60896b19caaa3ce3ef29f270586831a829f8977321bff5d936d55fb7d518d7d',
+            Recorder='3fd34b5173cfb0a9885606d9cd1e374b712e9ed51f0a17d4a899d47de71c6245',
         )
-        launcher_path = os.path.join(self.work_dir, "slipmodel.py")
-        with open(launcher_path, "w") as fh:
-            fh.write(script)
-        return launcher_path
+        if hashes != expected:
+            raise RuntimeError('Native sources differ from the verified CPU backend contract; validate this revision before use.')
+        check_native_likelihood()
+        if self.cpu_kernel == 'vectorized':
+            binary = os.path.join(os.path.dirname(__file__), 'native_cpu.py')
+            with open(binary, 'rb') as stream:
+                hashes['bridge_cpu_adapter'] = hashlib.sha256(stream.read()).hexdigest()
+        from altar import meta as altar_meta
+        from pyre import meta as pyre_meta
+        return os.path.abspath(binary), dict(python=sys.executable, platform=platform.platform(),
+                                            source_hashes=hashes, altar_path=altar.__file__, pyre_path=pyre.__file__,
+                                            altar_version=altar_meta.version, pyre_version=pyre_meta.version)
 
-    def _run_altar(self, pfg_path: str) -> None:
-        """Invokes ALTar via a Python launcher script and monitors completion.
+    def _after_run(self, run, manifest):
+        pass
 
-        We execute a generated ``slipmodel.py`` application with the current
-        Python interpreter rather than calling ``altar sample``.  The generic
-        ``altar sample`` subcommand only samples a single placeholder parameter
-        and does not load the seismic model's psets.  The launcher script
-        creates a proper ``SlipModel`` application whose default model is
-        ``altar.models.seismic.static``, which correctly activates all psets.
+    def _extra_manifest(self):
+        return {}
 
-        Args:
-            pfg_path: Absolute path to the ``.pfg`` configuration file.
+    backend_name = 'serial CPU linear'
 
-        Raises:
-            RuntimeError: If the Python launcher exits with a non-zero
-                return code.
-        """
-        launcher_path = self._write_launcher_script()
-        cmd = [sys.executable, launcher_path, f"--config={pfg_path}"]
-        print(f"Running ALTar: {' '.join(cmd)}")
+    def _export_inputs(self, exporter, green, data):
+        return exporter.export_whitened(green, data)
 
-        result = subprocess.run(
-            cmd,
-            cwd=self.work_dir,
-            capture_output=False,
-            text=True,
-            check=False,
-        )
+    def _configuration(self, problem, case, results):
+        return AltarConfigBuilder(problem.G.shape[1], len(problem.data), case,
+            self.chains, self.steps, self.tasks, results, self.output_freq, self.seed, self.prior,
+            self.initial_scaling, self.acceptance_weight, self.rejection_weight)
 
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"ALTar exited with code {result.returncode}.\n"
-                f"Command: {' '.join(cmd)}\n"
-                "Check the terminal output above for ALTar error messages."
-            )
+    def solve_problem(self, problem, bounds=None):
+        self.reset()
+        if not isinstance(problem, AltarProblem):
+            raise TypeError('solve_problem requires AltarProblem.')
+        offset, matrix = self._transform(problem, bounds)
+        binary, backend = self._preflight()
+        if self.chains <= problem.G.shape[1]:
+            warnings.warn('Population is no larger than parameter count; sampling adequacy needs separate validation.', stacklevel=2)
+        os.makedirs(self.work_dir, exist_ok=True)
+        run = tempfile.mkdtemp(prefix='run-', dir=self.work_dir)
+        self.last_run_path = run
+        results = os.path.join(run, self.output_dir)
+        case = os.path.join(run, 'case')
+        g, d, logdet = problem.whiten(self.alpha_cp)
+        transformed_g = g*matrix if matrix.ndim == 1 else g @ matrix
+        transformed_d = d-g @ offset
+        paths = self._export_inputs(AltarDataExporter(case), transformed_g, transformed_d)
+        config = self._configuration(problem, case, results)
+        pfg = config.save(os.path.join(run, 'linear.pfg'))
+        manifest = dict(backend=self.backend_name, environment=backend, n_parameters=problem.G.shape[1],
+                        n_observations=len(problem.data), layout=problem.layout, prior=self.prior,
+                        noise_representation='blocks' if isinstance(problem.covariance, tuple) else
+                                             'diagonal variances' if problem.covariance.ndim == 1 else 'full covariance',
+                        transform=dict(offset=offset.tolist(), scales=matrix.tolist()) if matrix.ndim == 1 else {}, seed=self.seed,
+                        chains=self.chains, steps=self.steps, output_dir=self.output_dir, output_freq=self.output_freq,
+                        cp_policy='fixed observation-based', alpha_cp=self.alpha_cp, representation='observation whitened once, including fixed Cp; affine prior coordinates',
+                        cpu_kernel=self.cpu_kernel, initial_scaling=self.initial_scaling, acceptance_weight=self.acceptance_weight,
+                        rejection_weight=self.rejection_weight, likelihood_offset=-.5*logdet,
+                        prior_offset=-float(np.log(matrix).sum() if matrix.ndim == 1 else np.linalg.slogdet(matrix)[1]),
+                        parameter_sets=[dict(name='theta', width=problem.G.shape[1])], status='running')
+        manifest.update(self._extra_manifest())
+        if matrix.ndim == 2:
+            transform_path = os.path.join(run, 'prior_transform.npz')
+            np.savez(transform_path, offset=offset, matrix=matrix)
+            with open(transform_path, 'rb') as stream:
+                manifest['transform'] = dict(file='prior_transform.npz', sha256=hashlib.sha256(stream.read()).hexdigest())
+        np.savez(os.path.join(run, 'physical_problem.npz'), G=problem.G, data=problem.data,
+                 **problem.covariance_arrays, alpha_cp=self.alpha_cp, smoothing=problem.smoothing if problem.smoothing is not None else np.zeros((0, problem.G.shape[1])))
+        manifest['input_sha256'] = {}
+        for name, path in paths.items():
+            manifest['input_sha256'][name] = file_hash(path)
+        manifest_path = os.path.join(run, 'manifest.json')
+        def save_manifest():
+            with open(manifest_path, 'w') as stream:
+                json.dump(manifest, stream, indent=2)
+        save_manifest()
+        try:
+            self._run_altar(binary, pfg, run)
+            self._after_run(run, manifest)
+            posterior = AltarResultImporter().load(results, manifest=manifest)
+            manifest['status'] = 'complete'
+            save_manifest()
+        except BaseException as exc:
+            manifest['status'] = 'failed'
+            manifest['error'] = str(exc)
+            save_manifest()
+            raise
+        if not self.keep_work_dir:
+            shutil.rmtree(run)
+            posterior.run_path = None
+            posterior.step_files = []
+            self.last_run_path = None
+        self.last_posterior, self.last_problem = posterior, problem
+        self.last_prior_transform = (offset, matrix)
+        self.last_manifest = manifest
+        return posterior.mean
 
-    def _import_results(
-        self, results_dir: str, n_patches: int
-    ) -> AltarSlipDistribution:
-        """Reads ALTar's HDF5 output and returns an AltarSlipDistribution.
+    def _progress(self, run, started):
+        from .progress import save_progress
+        return save_progress(run, started, self.initial_scaling)
 
-        Args:
-            results_dir: Directory containing ``step_final.h5`` and
-                ``BetaStatistics.txt``.
-            n_patches: Number of fault patches expected in the output.
+    def _command(self, binary, pfg):
+        return [sys.executable, binary, f'--config={pfg}']
 
-        Returns:
-            Fully populated ``AltarSlipDistribution``.
-        """
-        importer = AltarResultImporter()
-        return importer.load(results_dir, n_patches)
+    def _run_altar(self, binary, pfg, run):
+        log = os.path.join(run, 'sampler.log')
+        command = self._command(binary, pfg)
+        if sys.platform != 'darwin' and os.path.isfile('/usr/bin/time'):
+            command = ['/usr/bin/time', '-v'] + command
+        started = time.monotonic()
+        with open(log, 'w') as stream:
+            process = subprocess.Popen(command, cwd=run, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
+            try:
+                while True:
+                    remaining = self.timeout-(time.monotonic()-started)
+                    if remaining <= 0:
+                        raise subprocess.TimeoutExpired(command, self.timeout)
+                    try:
+                        code = process.wait(timeout=min(1., remaining))
+                        break
+                    except subprocess.TimeoutExpired:
+                        self._progress(run, started)
+            except BaseException as exc:
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+                except ProcessLookupError:
+                    pass
+                finally:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait()
+                    self._progress(run, started)
+                if isinstance(exc, KeyboardInterrupt):
+                    raise
+                raise RuntimeError(f'AlTar interrupted or timed out. Logs retained at {log}') from exc
+        self._progress(run, started)
+        if code:
+            raise RuntimeError(f'AlTar exited with code {code}. Logs retained at {log}')
+
+
+def check_native_likelihood():
+    """Release gate for the actual whitened native norm and normalization."""
+    import altar
+    from altar.models.linear.Linear import Linear
+    from altar.norms.L2 import L2
+    for correlation in (.8, -.8, 0.):
+        for scale in (1., 1e-8, 1e3):
+            covariance = scale*np.array([[1., correlation], [correlation, 2.]])
+            c = altar.matrix(shape=(2, 2)); c.ndarray()[:] = np.eye(2)
+            factor = Linear.computeCovarianceInverse(None, c)
+            normalization = Linear.computeNormalization(None, 2, c)
+            lc = np.linalg.cholesky(covariance)
+            offset = -np.log(np.diag(lc)).sum()
+            for residual in ([1., 2.], [2., -1.], [0., 1.]):
+                residual = np.array(residual)
+                v = altar.vector(shape=2); v.ndarray()[:] = solve_triangular(lc, residual, lower=True)
+                actual = normalization-.5*L2.withCovariance(None, v, factor)**2+offset
+                expected = -.5*(residual @ np.linalg.solve(covariance, residual) + np.linalg.slogdet(covariance)[1] + 2*np.log(2*np.pi))
+                if not np.isclose(actual, expected, rtol=1e-10, atol=1e-8):
+                    raise RuntimeError('Whitened native Gaussian likelihood failed numerical parity.')

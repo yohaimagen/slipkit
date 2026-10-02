@@ -1,178 +1,80 @@
-"""
-ALTar data exporter.
-
-Converts SlipKit data structures into the HDF5 files that ALTar's static slip
-inversion model expects as inputs.
-"""
-
+"""Plain-text inputs required by the pinned AlTar CPU linear loader."""
 import os
-from typing import Dict
-
-import h5py
 import numpy as np
+from .problem import AltarProblem, validate_covariance
 
 
 class AltarDataExporter:
-    """Exports SlipKit arrays to ALTar-compatible HDF5 input files.
+    def __init__(self, output_dir):
+        self.output_dir = os.path.abspath(output_dir)
+        os.makedirs(self.output_dir, exist_ok=True)
 
-    ALTar's static model expects three mandatory input files:
-
-    * ``green.h5`` — Green's function matrix ``(N_obs, N_param)``.
-    * ``data.h5``  — Observed displacement vector ``(N_obs,)``.
-    * ``cd.h5``    — Data covariance matrix ``(N_obs, N_obs)``.
-
-    Optionally, a ``areas.h5`` file stores patch areas for the Moment
-    distribution seeding.
-
-    Attributes:
-        output_dir: Directory where all exported files are written.
-    """
-
-    def __init__(self, output_dir: str) -> None:
-        """Initialises the exporter.
-
-        Args:
-            output_dir: Path to the directory for ALTar input files. Created
-                if it does not already exist.
-        """
-        self.output_dir = output_dir
-        os.makedirs(output_dir, exist_ok=True)
-
-    # ------------------------------------------------------------------
-    # Individual export methods
-    # ------------------------------------------------------------------
-
-    def export_greens_function(
-        self, G: np.ndarray, filename: str = "green.h5"
-    ) -> str:
-        """Writes the Green's function matrix to an HDF5 file.
-
-        ALTar expects the matrix stored with shape ``(N_obs, N_param)`` and
-        dataset name ``"green"``.
-
-        Args:
-            G: Green's function matrix of shape ``(N_obs, N_param)`` where
-               ``N_param = 2 * M_patches``.
-            filename: Output file name relative to ``output_dir``.
-
-        Returns:
-            Absolute path of the written file.
-        """
+    def _write(self, values, filename):
+        values = np.asarray(values, dtype=float)
+        if not values.size or not np.isfinite(values).all():
+            raise ValueError('Exported arrays must be nonempty and finite.')
         path = os.path.join(self.output_dir, filename)
-        with h5py.File(path, "w") as f:
-            f.create_dataset("green", data=G.astype(np.float64))
+        np.savetxt(path, values)
         return path
 
-    def export_data(
-        self, d_obs: np.ndarray, filename: str = "data.h5"
-    ) -> str:
-        """Writes the observed displacement vector to an HDF5 file.
+    def export_greens_function(self, G, filename='green.txt'):
+        if np.asarray(G).ndim != 2:
+            raise ValueError('G must be two-dimensional.')
+        return self._write(G, filename)
 
-        Args:
-            d_obs: Observed displacements of shape ``(N_obs,)``.
-            filename: Output file name relative to ``output_dir``.
+    def export_data(self, d_obs, filename='data.txt'):
+        if np.asarray(d_obs).ndim != 1:
+            raise ValueError('Data must be one-dimensional.')
+        return self._write(d_obs, filename)
 
-        Returns:
-            Absolute path of the written file.
-        """
-        path = os.path.join(self.output_dir, filename)
-        with h5py.File(path, "w") as f:
-            f.create_dataset("data", data=d_obs.astype(np.float64))
-        return path
+    def export_covariance(self, sigma=None, d_obs=None, alpha_cp=0., filename='cd.txt', *, covariance=None):
+        if not np.isfinite(alpha_cp) or alpha_cp < 0:
+            raise ValueError('alpha_cp must be finite and nonnegative.')
+        d = np.asarray(d_obs, dtype=float)
+        if covariance is None:
+            sigma = np.asarray(sigma, dtype=float)
+            if sigma.ndim != 1 or not np.isfinite(sigma).all() or np.any(sigma <= 0):
+                raise ValueError('sigma must be finite and positive.')
+            covariance = sigma**2
+        c = validate_covariance(covariance, len(covariance)).copy()
+        if alpha_cp:
+            if d.shape != (len(c),) or not np.isfinite(d).all():
+                raise ValueError('Fixed Cp requires finite observations matching covariance.')
+            if c.ndim == 1:
+                c += (alpha_cp*d)**2
+            else:
+                c[np.diag_indices(len(c))] += (alpha_cp*d)**2
+        return self._write(np.diag(c) if c.ndim == 1 else c, filename)
 
-    def export_covariance(
-        self,
-        sigma: np.ndarray,
-        d_obs: np.ndarray,
-        alpha_cp: float = 0.0,
-        filename: str = "cd.h5",
-    ) -> str:
-        """Writes the data covariance matrix (plus optional static Cp) to HDF5.
+    def export_whitened(self, G, data):
+        """Whitening already validated the frozen physical covariance."""
+        if np.asarray(G).ndim != 2 or np.asarray(data).shape != (np.asarray(G).shape[0],):
+            raise ValueError('Whitened G/data must share the observation axis.')
+        return dict(green=self.export_greens_function(G), data=self.export_data(data),
+                    cd=self._write(np.eye(len(data)), 'cd.txt'))
 
-        Constructs ``Cd = diag(sigma²)``. When ``alpha_cp > 0``, the static
-        prediction covariance ``Cp = diag((alpha_cp * d_obs)²)`` is added to
-        form the combined misfit covariance ``Cx = Cd + Cp`` following the
-        Minson et al. (2013) fractional error model.
+    def export_cuda(self, G, data):
+        """Binary whitened inputs for native static CUDA; no identity matrix/file."""
+        import h5py
+        g, d = np.asarray(G), np.asarray(data)
+        if g.ndim != 2 or d.shape != (len(g),) or not g.size or not np.isfinite(g).all() or not np.isfinite(d).all():
+            raise ValueError('CUDA G/data must be finite and share the observation axis.')
+        paths = {}
+        for key, values in dict(green=g, data=d).items():
+            path = os.path.join(self.output_dir, key+'.h5')
+            with h5py.File(path, 'w') as output:
+                output[key] = values
+            paths[key] = path
+        return paths
 
-        Args:
-            sigma: Diagonal data uncertainties of shape ``(N_obs,)``.
-            d_obs: Observed displacements of shape ``(N_obs,)`` used to
-                compute ``Cp`` when ``alpha_cp > 0``.
-            alpha_cp: Fractional model error coefficient. Set to ``0`` to
-                use ``Cd`` only.
-            filename: Output file name relative to ``output_dir``.
-
-        Returns:
-            Absolute path of the written file.
-        """
-        cd_diag = sigma ** 2
-        if alpha_cp > 0.0:
-            cp_diag = (alpha_cp * d_obs) ** 2
-            cx_diag = cd_diag + cp_diag
-        else:
-            cx_diag = cd_diag
-
-        cx = np.diag(cx_diag)
-        path = os.path.join(self.output_dir, filename)
-        with h5py.File(path, "w") as f:
-            f.create_dataset("cd", data=cx.astype(np.float64))
-        return path
-
-    def export_areas(
-        self, areas_m2: np.ndarray, filename: str = "areas.h5"
-    ) -> str:
-        """Writes patch areas (in km²) to an HDF5 file.
-
-        ALTar's Moment distribution expects areas in km². This method converts
-        from m² (SlipKit internal units) to km² before writing.
-
-        Args:
-            areas_m2: Patch areas in square metres, shape ``(M,)``.
-            filename: Output file name relative to ``output_dir``.
-
-        Returns:
-            Absolute path of the written file.
-        """
-        areas_km2 = areas_m2 / 1e6
-        path = os.path.join(self.output_dir, filename)
-        with h5py.File(path, "w") as f:
-            f.create_dataset("areas", data=areas_km2.astype(np.float64))
-        return path
-
-    # ------------------------------------------------------------------
-    # Convenience method
-    # ------------------------------------------------------------------
-
-    def export_all(
-        self,
-        G: np.ndarray,
-        d_obs: np.ndarray,
-        sigma: np.ndarray,
-        areas_m2: np.ndarray,
-        alpha_cp: float = 0.0,
-    ) -> Dict[str, str]:
-        """Exports all required ALTar input files in a single call.
-
-        Args:
-            G: Green's function matrix ``(N_obs, 2 * M_patches)``.
-            d_obs: Observed displacements ``(N_obs,)``.
-            sigma: Diagonal uncertainties ``(N_obs,)``.
-            areas_m2: Patch areas in m² ``(M_patches,)``.
-            alpha_cp: Fractional model error coefficient for static Cp.
-
-        Returns:
-            A dict mapping logical names to absolute file paths::
-
-                {
-                    "green": "/path/green.h5",
-                    "data":  "/path/data.h5",
-                    "cd":    "/path/cd.h5",
-                    "areas": "/path/areas.h5",
-                }
-        """
-        return {
-            "green": self.export_greens_function(G),
-            "data": self.export_data(d_obs),
-            "cd": self.export_covariance(sigma, d_obs, alpha_cp),
-            "areas": self.export_areas(areas_m2),
-        }
+    def export_all(self, G, d_obs, sigma=None, areas_m2=None, alpha_cp=0., *, covariance=None):
+        if areas_m2 is not None:
+            raise ValueError('CPU linear does not consume areas; no area file is exported.')
+        if covariance is None:
+            sigma = np.asarray(sigma, dtype=float)
+            if sigma.ndim != 1 or not np.isfinite(sigma).all() or np.any(sigma <= 0):
+                raise ValueError('sigma must be finite and positive.')
+        c = sigma**2 if covariance is None else covariance
+        problem = AltarProblem(G, d_obs, c)
+        return dict(green=self.export_greens_function(problem.G), data=self.export_data(problem.data),
+                    cd=self.export_covariance(sigma, d_obs, alpha_cp, covariance=problem.covariance))

@@ -1,0 +1,27 @@
+-- Found Git: /usr/bin/git (found version "2.39.5")
+-- The CXX compiler identification is GNU 11.3.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/g++-11 - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Found Python3: /usr/bin/python3 (found version "3.11.2") found components: Interpreter Development NumPy Development.Module Development.Embed
+-- Found GSL: /usr/include (found version "2.7.1")
+-- Looking for sgemm_
+-- Looking for sgemm_ - found
+-- Found BLAS: /usr/lib/x86_64-linux-gnu/libopenblas.so
+-- Found MPI_CXX: /usr/lib/x86_64-linux-gnu/openmpi/lib/libmpi_cxx.so (found version "3.1")
+-- Found MPI: TRUE (found version "3.1")
+-- Could NOT find PostgreSQL (missing: PostgreSQL_LIBRARY PostgreSQL_INCLUDE_DIR) 
+-- Looking for a CUDA compiler
+-- Looking for a CUDA compiler - /usr/bin/nvcc
+-- The CUDA compiler identification is NVIDIA 11.8.89 with host compiler GNU 11.3.0
+-- Detecting CUDA compiler ABI info
+-- Detecting CUDA compiler ABI info - done
+-- Check for working CUDA compiler: /usr/bin/nvcc - skipped
+-- Detecting CUDA compile features
+-- Detecting CUDA compile features - done
+-- CUDA Toolkit found and CUDA support is enabled
+-- Configuring done (8.7s)
+-- Generating done (0.0s)
+-- Build files have been written to: /export/dump/ymagen/slipkit-altar-round2-20260918/build/pyre-gcc11

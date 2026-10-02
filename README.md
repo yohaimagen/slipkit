@@ -34,8 +34,36 @@ A worked example is in `venezuela_resolution.ipynb` (a dedicated companion to
 
 ## Installation
 
-(Installation instructions will go here)
+Install core Python dependencies with `python -m pip install -e .`.
+For the CPU AlTar bridge use `python -m pip install -e '.[bayesian,test]'`
+inside a separately provisioned native AlTar/Pyre environment. The ordinary
+Python packages called altar/pyre are not a substitute for that framework.
+`environment-altar.yml` records the tested Python numerical stack; it does
+not install the native framework. The verified environment uses AlTar 2.0.2
+revision 6646198 and Pyre 1.9.6 revision 86ff61856. Preflight checks native
+model/distribution/recorder source hashes against the tested implementation.
+See [CPU bridge contract](docs/altar_cpu.md) for installation limits and API details.
 
 ## Usage
 
-(Quick start usage examples will go here)
+Run `python examples/altar_synthetic_tutorial.py` from the native environment.
+The matching notebook uses the same tiny mesh defined directly from arrays.
+It checks sampled means and uncertainties against an exact Gaussian reference.
+
+Run bridge regressions with `python -m pytest slipkit/tests/core/test_bayesian_inversion.py`.
+Add `SLIPKIT_RUN_ALTAR=1` to include the opt-in real sampler tests.
+Older integration plans and PyMC examples are historical, not installation instructions
+for the current CPU AlTar bridge.
+
+## Exact Gaussian inference and CPU tuning
+
+For fixed linear geometry/noise and Gaussian priors, select
+`GaussianBayesianSolver(prior_scales=..., prior_mean=..., draws=4096, seed=17)`
+with the same AltarAssembler and orchestrator. It returns exact posterior means
+and independent physical posterior draws without launching AlTar. It does not
+implement finite bounds or silently replace an AlTar request.
+
+Native requests now whiten observations once to correct the installed correlated
+covariance norm defect. Optional `cpu_kernel="vectorized"` optimizes standardized
+CPU likelihoods without changing the native installation. Proposal controls and
+incremental progress/failure reports are documented in [the CPU contract](docs/altar_cpu.md).

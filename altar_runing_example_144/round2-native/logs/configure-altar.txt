@@ -1,0 +1,273 @@
+-- Found Git: /usr/bin/git (found version "2.39.5")
+-- The CXX compiler identification is GNU 11.3.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/g++-11 - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Found GSL: /usr/include (found version "2.7.1")
+-- Found MPI_CXX: /usr/lib/x86_64-linux-gnu/openmpi/lib/libmpi_cxx.so (found version "3.1")
+-- Found MPI: TRUE (found version "3.1")
+-- Found Python: /usr/bin/python3 (found suitable version "3.11.2", minimum required is "3.7") found components: Interpreter Development.Module NumPy Development.Embed
+-- /export/dump/ymagen/slipkit-altar-round2-20260918/native
+-- Found PYRE: /export/dump/ymagen/slipkit-altar-round2-20260918/native
+-- Looking for a CUDA compiler
+-- Looking for a CUDA compiler - /usr/bin/nvcc
+-- The CUDA compiler identification is NVIDIA 11.8.89 with host compiler GNU 11.3.0
+-- Detecting CUDA compiler ABI info
+-- Detecting CUDA compiler ABI info - done
+-- Check for working CUDA compiler: /usr/bin/nvcc - skipped
+-- Detecting CUDA compile features
+-- Detecting CUDA compile features - done
+-- CUDA Toolkit found and CUDA support is enabled
+CMake Warning (dev) at .cmake/altar_cudaframework.cmake:87 (add_custom_command):
+  The following keywords are not supported when using
+  add_custom_command(TARGET): DEPENDS.
+
+  Policy CMP0175 is not set: add_custom_command() rejects invalid arguments.
+  Run "cmake --help-policy CMP0175" for policy details.  Use the cmake_policy
+  command to set the policy and suppress this warning.
+Call Stack (most recent call first):
+  cuda/CMakeLists.txt:12 (altar_cuda_buildLibrary)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) at .cmake/altar_cudaframework.cmake:87 (add_custom_command):
+  Exactly one of PRE_BUILD, PRE_LINK, or POST_BUILD must be given.  Assuming
+  POST_BUILD to preserve backward compatibility.
+
+  Policy CMP0175 is not set: add_custom_command() rejects invalid arguments.
+  Run "cmake --help-policy CMP0175" for policy details.  Use the cmake_policy
+  command to set the policy and suppress this warning.
+Call Stack (most recent call first):
+  cuda/CMakeLists.txt:12 (altar_cuda_buildLibrary)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) at .cmake/altar_cudaframework.cmake:87 (add_custom_command):
+  The following keywords are not supported when using
+  add_custom_command(TARGET): DEPENDS.
+
+  Policy CMP0175 is not set: add_custom_command() rejects invalid arguments.
+  Run "cmake --help-policy CMP0175" for policy details.  Use the cmake_policy
+  command to set the policy and suppress this warning.
+Call Stack (most recent call first):
+  cuda/CMakeLists.txt:12 (altar_cuda_buildLibrary)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) at .cmake/altar_cudaframework.cmake:87 (add_custom_command):
+  Exactly one of PRE_BUILD, PRE_LINK, or POST_BUILD must be given.  Assuming
+  POST_BUILD to preserve backward compatibility.
+
+  Policy CMP0175 is not set: add_custom_command() rejects invalid arguments.
+  Run "cmake --help-policy CMP0175" for policy details.  Use the cmake_policy
+  command to set the policy and suppress this warning.
+Call Stack (most recent call first):
+  cuda/CMakeLists.txt:12 (altar_cuda_buildLibrary)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) at .cmake/altar_cudaframework.cmake:87 (add_custom_command):
+  The following keywords are not supported when using
+  add_custom_command(TARGET): DEPENDS.
+
+  Policy CMP0175 is not set: add_custom_command() rejects invalid arguments.
+  Run "cmake --help-policy CMP0175" for policy details.  Use the cmake_policy
+  command to set the policy and suppress this warning.
+Call Stack (most recent call first):
+  cuda/CMakeLists.txt:12 (altar_cuda_buildLibrary)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) at .cmake/altar_cudaframework.cmake:87 (add_custom_command):
+  Exactly one of PRE_BUILD, PRE_LINK, or POST_BUILD must be given.  Assuming
+  POST_BUILD to preserve backward compatibility.
+
+  Policy CMP0175 is not set: add_custom_command() rejects invalid arguments.
+  Run "cmake --help-policy CMP0175" for policy details.  Use the cmake_policy
+  command to set the policy and suppress this warning.
+Call Stack (most recent call first):
+  cuda/CMakeLists.txt:12 (altar_cuda_buildLibrary)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) at .cmake/altar_cudaframework.cmake:87 (add_custom_command):
+  The following keywords are not supported when using
+  add_custom_command(TARGET): DEPENDS.
+
+  Policy CMP0175 is not set: add_custom_command() rejects invalid arguments.
+  Run "cmake --help-policy CMP0175" for policy details.  Use the cmake_policy
+  command to set the policy and suppress this warning.
+Call Stack (most recent call first):
+  cuda/CMakeLists.txt:12 (altar_cuda_buildLibrary)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) at .cmake/altar_cudaframework.cmake:87 (add_custom_command):
+  Exactly one of PRE_BUILD, PRE_LINK, or POST_BUILD must be given.  Assuming
+  POST_BUILD to preserve backward compatibility.
+
+  Policy CMP0175 is not set: add_custom_command() rejects invalid arguments.
+  Run "cmake --help-policy CMP0175" for policy details.  Use the cmake_policy
+  command to set the policy and suppress this warning.
+Call Stack (most recent call first):
+  cuda/CMakeLists.txt:12 (altar_cuda_buildLibrary)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) at .cmake/altar_cudaframework.cmake:87 (add_custom_command):
+  The following keywords are not supported when using
+  add_custom_command(TARGET): DEPENDS.
+
+  Policy CMP0175 is not set: add_custom_command() rejects invalid arguments.
+  Run "cmake --help-policy CMP0175" for policy details.  Use the cmake_policy
+  command to set the policy and suppress this warning.
+Call Stack (most recent call first):
+  cuda/CMakeLists.txt:12 (altar_cuda_buildLibrary)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) at .cmake/altar_cudaframework.cmake:87 (add_custom_command):
+  Exactly one of PRE_BUILD, PRE_LINK, or POST_BUILD must be given.  Assuming
+  POST_BUILD to preserve backward compatibility.
+
+  Policy CMP0175 is not set: add_custom_command() rejects invalid arguments.
+  Run "cmake --help-policy CMP0175" for policy details.  Use the cmake_policy
+  command to set the policy and suppress this warning.
+Call Stack (most recent call first):
+  cuda/CMakeLists.txt:12 (altar_cuda_buildLibrary)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) at .cmake/altar_cudaframework.cmake:87 (add_custom_command):
+  The following keywords are not supported when using
+  add_custom_command(TARGET): DEPENDS.
+
+  Policy CMP0175 is not set: add_custom_command() rejects invalid arguments.
+  Run "cmake --help-policy CMP0175" for policy details.  Use the cmake_policy
+  command to set the policy and suppress this warning.
+Call Stack (most recent call first):
+  cuda/CMakeLists.txt:12 (altar_cuda_buildLibrary)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) at .cmake/altar_cudaframework.cmake:87 (add_custom_command):
+  Exactly one of PRE_BUILD, PRE_LINK, or POST_BUILD must be given.  Assuming
+  POST_BUILD to preserve backward compatibility.
+
+  Policy CMP0175 is not set: add_custom_command() rejects invalid arguments.
+  Run "cmake --help-policy CMP0175" for policy details.  Use the cmake_policy
+  command to set the policy and suppress this warning.
+Call Stack (most recent call first):
+  cuda/CMakeLists.txt:12 (altar_cuda_buildLibrary)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) at .cmake/altar_cudaframework.cmake:87 (add_custom_command):
+  The following keywords are not supported when using
+  add_custom_command(TARGET): DEPENDS.
+
+  Policy CMP0175 is not set: add_custom_command() rejects invalid arguments.
+  Run "cmake --help-policy CMP0175" for policy details.  Use the cmake_policy
+  command to set the policy and suppress this warning.
+Call Stack (most recent call first):
+  cuda/CMakeLists.txt:12 (altar_cuda_buildLibrary)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) at .cmake/altar_cudaframework.cmake:87 (add_custom_command):
+  Exactly one of PRE_BUILD, PRE_LINK, or POST_BUILD must be given.  Assuming
+  POST_BUILD to preserve backward compatibility.
+
+  Policy CMP0175 is not set: add_custom_command() rejects invalid arguments.
+  Run "cmake --help-policy CMP0175" for policy details.  Use the cmake_policy
+  command to set the policy and suppress this warning.
+Call Stack (most recent call first):
+  cuda/CMakeLists.txt:12 (altar_cuda_buildLibrary)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) at .cmake/altar_cudaframework.cmake:87 (add_custom_command):
+  The following keywords are not supported when using
+  add_custom_command(TARGET): DEPENDS.
+
+  Policy CMP0175 is not set: add_custom_command() rejects invalid arguments.
+  Run "cmake --help-policy CMP0175" for policy details.  Use the cmake_policy
+  command to set the policy and suppress this warning.
+Call Stack (most recent call first):
+  cuda/CMakeLists.txt:12 (altar_cuda_buildLibrary)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) at .cmake/altar_cudaframework.cmake:87 (add_custom_command):
+  Exactly one of PRE_BUILD, PRE_LINK, or POST_BUILD must be given.  Assuming
+  POST_BUILD to preserve backward compatibility.
+
+  Policy CMP0175 is not set: add_custom_command() rejects invalid arguments.
+  Run "cmake --help-policy CMP0175" for policy details.  Use the cmake_policy
+  command to set the policy and suppress this warning.
+Call Stack (most recent call first):
+  cuda/CMakeLists.txt:12 (altar_cuda_buildLibrary)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) at .cmake/altar_cudaframework.cmake:87 (add_custom_command):
+  The following keywords are not supported when using
+  add_custom_command(TARGET): DEPENDS.
+
+  Policy CMP0175 is not set: add_custom_command() rejects invalid arguments.
+  Run "cmake --help-policy CMP0175" for policy details.  Use the cmake_policy
+  command to set the policy and suppress this warning.
+Call Stack (most recent call first):
+  cuda/CMakeLists.txt:12 (altar_cuda_buildLibrary)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) at .cmake/altar_cudaframework.cmake:87 (add_custom_command):
+  Exactly one of PRE_BUILD, PRE_LINK, or POST_BUILD must be given.  Assuming
+  POST_BUILD to preserve backward compatibility.
+
+  Policy CMP0175 is not set: add_custom_command() rejects invalid arguments.
+  Run "cmake --help-policy CMP0175" for policy details.  Use the cmake_policy
+  command to set the policy and suppress this warning.
+Call Stack (most recent call first):
+  cuda/CMakeLists.txt:12 (altar_cuda_buildLibrary)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) at .cmake/altar_cudaframework.cmake:87 (add_custom_command):
+  The following keywords are not supported when using
+  add_custom_command(TARGET): DEPENDS.
+
+  Policy CMP0175 is not set: add_custom_command() rejects invalid arguments.
+  Run "cmake --help-policy CMP0175" for policy details.  Use the cmake_policy
+  command to set the policy and suppress this warning.
+Call Stack (most recent call first):
+  cuda/CMakeLists.txt:12 (altar_cuda_buildLibrary)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) at .cmake/altar_cudaframework.cmake:87 (add_custom_command):
+  Exactly one of PRE_BUILD, PRE_LINK, or POST_BUILD must be given.  Assuming
+  POST_BUILD to preserve backward compatibility.
+
+  Policy CMP0175 is not set: add_custom_command() rejects invalid arguments.
+  Run "cmake --help-policy CMP0175" for policy details.  Use the cmake_policy
+  command to set the policy and suppress this warning.
+Call Stack (most recent call first):
+  cuda/CMakeLists.txt:12 (altar_cuda_buildLibrary)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) at .cmake/altar_cudaframework.cmake:87 (add_custom_command):
+  The following keywords are not supported when using
+  add_custom_command(TARGET): DEPENDS.
+
+  Policy CMP0175 is not set: add_custom_command() rejects invalid arguments.
+  Run "cmake --help-policy CMP0175" for policy details.  Use the cmake_policy
+  command to set the policy and suppress this warning.
+Call Stack (most recent call first):
+  cuda/CMakeLists.txt:12 (altar_cuda_buildLibrary)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+CMake Warning (dev) at .cmake/altar_cudaframework.cmake:87 (add_custom_command):
+  Exactly one of PRE_BUILD, PRE_LINK, or POST_BUILD must be given.  Assuming
+  POST_BUILD to preserve backward compatibility.
+
+  Policy CMP0175 is not set: add_custom_command() rejects invalid arguments.
+  Run "cmake --help-policy CMP0175" for policy details.  Use the cmake_policy
+  command to set the policy and suppress this warning.
+Call Stack (most recent call first):
+  cuda/CMakeLists.txt:12 (altar_cuda_buildLibrary)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+-- Configuring done (9.3s)
+-- Generating done (0.0s)
+CMake Warning:
+  Manually-specified variables were not used by the project:
+
+    Python3_EXECUTABLE
+
+
+-- Build files have been written to: /export/dump/ymagen/slipkit-altar-round2-20260918/build/altar

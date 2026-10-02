@@ -1,0 +1,88 @@
+[  1%] Building CXX object bin/CMakeFiles/python.pyre.dir/python.cc.o
+[  2%] Building CXX object lib/CMakeFiles/journal.dir/journal/Chronicler.cc.o
+[  3%] Building CUDA object lib/CMakeFiles/pyrecuda.dir/cuda/linalg.cu.o
+[  5%] Building CUDA object lib/CMakeFiles/pyrecuda.dir/cuda/matrixops.cu.o
+[  6%] Building CXX object lib/CMakeFiles/journal.dir/journal/Device.cc.o
+[  8%] Building CUDA object lib/CMakeFiles/pyrecuda.dir/cuda/elementwise.cu.o
+[  8%] Building CXX object lib/CMakeFiles/journal.dir/journal/Console.cc.o
+[ 10%] Building CXX object lib/CMakeFiles/journal.dir/journal/Renderer.cc.o
+[ 11%] Building CXX object lib/CMakeFiles/journal.dir/journal/Streaming.cc.o
+[ 12%] Building CXX object lib/CMakeFiles/journal.dir/journal/firewalls.cc.o
+[ 14%] Building CXX object lib/CMakeFiles/journal.dir/journal/debuginfo.cc.o
+[ 15%] Linking CXX executable python.pyre
+[ 15%] Built target python.pyre
+[ 16%] Building CUDA object lib/CMakeFiles/pyrecuda.dir/cuda/statistics.cu.o
+[ 17%] Building CXX object lib/CMakeFiles/journal.dir/journal/journal.cc.o
+[ 19%] Building CUDA object lib/CMakeFiles/pyrecuda.dir/cuda/timer.cu.o
+[ 20%] Linking CXX shared library libjournal.so
+[ 20%] Built target journal
+[ 21%] Building CXX object lib/CMakeFiles/pyre.dir/pyre/memory/MemoryMap.cc.o
+[ 23%] Building CXX object lib/CMakeFiles/pyre.dir/pyre/timers/Display.cc.o
+[ 24%] Building CXX object extensions/CMakeFiles/journalmodule.dir/journal/journal.cc.o
+[ 25%] Building CXX object extensions/CMakeFiles/journalmodule.dir/journal/DeviceProxy.cc.o
+[ 26%] Building CXX object extensions/CMakeFiles/journalmodule.dir/journal/channels.cc.o
+[ 28%] Building CXX object lib/CMakeFiles/pyre.dir/pyre/timers/Timer.cc.o
+[ 29%] Building CXX object lib/CMakeFiles/pyre.dir/pyre/version.cc.o
+[ 30%] Building CXX object extensions/CMakeFiles/journalmodule.dir/journal/exceptions.cc.o
+[ 32%] Building CXX object extensions/CMakeFiles/journalmodule.dir/journal/init.cc.o
+[ 33%] Building CXX object extensions/CMakeFiles/journalmodule.dir/journal/metadata.cc.o
+[ 34%] Building CXX object extensions/CMakeFiles/journalmodule.dir/journal/tests.cc.o
+[ 35%] Linking CXX shared library libpyre.so
+[ 35%] Built target pyre
+[ 37%] Building CXX object extensions/CMakeFiles/hostmodule.dir/host/host.cc.o
+[ 38%] Building CXX object extensions/CMakeFiles/mpimodule.dir/mpi/mpi.cc.o
+[ 39%] Building CXX object extensions/CMakeFiles/timersmodule.dir/timers/timers.cc.o
+[ 41%] Building CXX object extensions/CMakeFiles/gslmodule.dir/gsl/gsl.cc.o
+[ 42%] Building CXX object extensions/CMakeFiles/gslmodule.dir/gsl/blas.cc.o
+[ 43%] Building CXX object extensions/CMakeFiles/hostmodule.dir/host/cpu.cc.o
+[ 44%] Building CXX object extensions/CMakeFiles/timersmodule.dir/timers/display.cc.o
+[ 46%] Building CXX object extensions/CMakeFiles/timersmodule.dir/timers/metadata.cc.o
+[ 47%] Building CXX object extensions/CMakeFiles/hostmodule.dir/host/metadata.cc.o
+[ 48%] Building CXX object extensions/CMakeFiles/gslmodule.dir/gsl/exceptions.cc.o
+[ 50%] Building CXX object extensions/CMakeFiles/gslmodule.dir/gsl/histogram.cc.o
+[ 51%] Linking CXX shared module host.cpython-311-x86_64-linux-gnu.so
+[ 52%] Linking CXX shared module timers.cpython-311-x86_64-linux-gnu.so
+[ 52%] Built target hostmodule
+[ 53%] Building CXX object extensions/CMakeFiles/gslmodule.dir/gsl/linalg.cc.o
+[ 53%] Built target timersmodule
+[ 55%] Building CXX object extensions/CMakeFiles/gslmodule.dir/gsl/matrix.cc.o
+[ 56%] Building CXX object extensions/CMakeFiles/gslmodule.dir/gsl/metadata.cc.o
+[ 57%] Building CXX object extensions/CMakeFiles/mpimodule.dir/mpi/communicators.cc.o
+[ 58%] Building CXX object extensions/CMakeFiles/gslmodule.dir/gsl/numpy.cc.o
+[ 60%] Building CXX object extensions/CMakeFiles/gslmodule.dir/gsl/pdf.cc.o
+[ 61%] Building CXX object extensions/CMakeFiles/gslmodule.dir/gsl/permutation.cc.o
+[ 62%] Building CXX object extensions/CMakeFiles/gslmodule.dir/gsl/rng.cc.o
+[ 64%] Building CXX object extensions/CMakeFiles/gslmodule.dir/gsl/stats.cc.o
+[ 65%] Building CXX object extensions/CMakeFiles/gslmodule.dir/gsl/vector.cc.o
+[ 66%] Building CXX object extensions/CMakeFiles/gslmodule.dir/gsl/partition.cc.o
+[ 67%] Building CXX object extensions/CMakeFiles/mpimodule.dir/mpi/exceptions.cc.o
+[ 69%] Linking CXX shared module journal.cpython-311-x86_64-linux-gnu.so
+[ 69%] Built target journalmodule
+[ 70%] Building CXX object extensions/CMakeFiles/mpimodule.dir/mpi/groups.cc.o
+[ 71%] Building CXX object extensions/CMakeFiles/mpimodule.dir/mpi/metadata.cc.o
+[ 73%] Building CXX object extensions/CMakeFiles/mpimodule.dir/mpi/ports.cc.o
+[ 74%] Building CXX object extensions/CMakeFiles/mpimodule.dir/mpi/startup.cc.o
+[ 75%] Linking CUDA shared library libpyrecuda.so
+[ 76%] Linking CXX shared module gsl.cpython-311-x86_64-linux-gnu.so
+[ 76%] Built target pyrecuda
+[ 78%] Building CXX object extensions/CMakeFiles/cudamodule.dir/cuda/cuda.cc.o
+[ 79%] Building CXX object extensions/CMakeFiles/cudamodule.dir/cuda/cublas.cc.o
+[ 80%] Building CXX object extensions/CMakeFiles/cudamodule.dir/cuda/curand.cc.o
+[ 82%] Building CXX object extensions/CMakeFiles/cudamodule.dir/cuda/cusolver.cc.o
+[ 82%] Built target gslmodule
+[ 83%] Building CXX object extensions/CMakeFiles/cudamodule.dir/cuda/exceptions.cc.o
+[ 84%] Building CXX object extensions/CMakeFiles/cudamodule.dir/cuda/device.cc.o
+[ 85%] Building CXX object extensions/CMakeFiles/cudamodule.dir/cuda/discover.cc.o
+[ 87%] Linking CXX shared module mpi.cpython-311-x86_64-linux-gnu.so
+[ 88%] Building CXX object extensions/CMakeFiles/cudamodule.dir/cuda/gsl.cc.o
+[ 88%] Built target mpimodule
+[ 89%] Building CXX object extensions/CMakeFiles/cudamodule.dir/cuda/matrix.cc.o
+[ 91%] Building CXX object extensions/CMakeFiles/cudamodule.dir/cuda/metadata.cc.o
+[ 92%] Building CXX object extensions/CMakeFiles/cudamodule.dir/cuda/numpy.cc.o
+[ 93%] Building CXX object extensions/CMakeFiles/cudamodule.dir/cuda/stream.cc.o
+[ 94%] Building CXX object extensions/CMakeFiles/cudamodule.dir/cuda/timer.cc.o
+[ 96%] Building CXX object extensions/CMakeFiles/cudamodule.dir/cuda/vector.cc.o
+[ 97%] Building CXX object extensions/CMakeFiles/cudamodule.dir/cuda/stats.cc.o
+[ 98%] Building CXX object extensions/CMakeFiles/cudamodule.dir/cuda/mpi.cc.o
+[100%] Linking CUDA shared module cuda.cpython-311-x86_64-linux-gnu.so
+[100%] Built target cudamodule

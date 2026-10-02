@@ -1,0 +1,49 @@
+Fri Sep 18 08:37:30 UTC 2026
+heisenbug
+Linux heisenbug 6.12.95+deb12-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.12.95-1~bpo12+1 (2026-07-05) x86_64 GNU/Linux
+Fri Sep 18 10:37:30 2026       
++---------------------------------------------------------------------------------------+
+| NVIDIA-SMI 535.309.01             Driver Version: 535.309.01   CUDA Version: 12.2     |
+|-----------------------------------------+----------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |         Memory-Usage | GPU-Util  Compute M. |
+|                                         |                      |               MIG M. |
+|=========================================+======================+======================|
+|   0  NVIDIA GeForce RTX 3090        Off | 00000000:01:00.0 Off |                  N/A |
+| 76%   71C    P2             268W / 350W |   1206MiB / 24576MiB |     58%      Default |
+|                                         |                      |                  N/A |
++-----------------------------------------+----------------------+----------------------+
+|   1  NVIDIA GeForce RTX 3090        Off | 00000000:C1:00.0 Off |                  N/A |
+| 54%   56C    P2             219W / 350W |   1184MiB / 24576MiB |     43%      Default |
+|                                         |                      |                  N/A |
++-----------------------------------------+----------------------+----------------------+
+                                                                                         
++---------------------------------------------------------------------------------------+
+| Processes:                                                                            |
+|  GPU   GI   CI        PID   Type   Process name                            GPU Memory |
+|        ID   ID                                                             Usage      |
+|=======================================================================================|
+|    0   N/A  N/A   1440127      C   ...ored/vdad_examples/.venv/bin/python     1200MiB |
+|    1   N/A  N/A   1437202      C   ...ored/vdad_examples/.venv/bin/python     1178MiB |
++---------------------------------------------------------------------------------------+
+nvcc: NVIDIA (R) Cuda compiler driver
+Copyright (c) 2005-2022 NVIDIA Corporation
+Built on Wed_Sep_21_10:33:58_PDT_2022
+Cuda compilation tools, release 11.8, V11.8.89
+Build cuda_11.8.r11.8/compiler.31833905_0
+gcc (Debian 12.2.0-14+deb12u1) 12.2.0
+Copyright (C) 2022 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+cmake version 3.31.6
+
+CMake suite maintained and supported by Kitware (kitware.com/cmake).
+2.7.1
+gcc -I/usr/include/hdf5/serial -L/usr/lib/x86_64-linux-gnu/hdf5/serial /usr/lib/x86_64-linux-gnu/hdf5/serial/libhdf5_hl.a /usr/lib/x86_64-linux-gnu/hdf5/serial/libhdf5.a -lcrypto -lcurl -lpthread -lsz -lz -ldl -lm
+               total        used        free      shared  buff/cache   available
+Mem:           503Gi        69Gi       364Gi       350Mi        74Gi       434Gi
+Swap:          3.9Gi       3.3Gi       654Mi
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/md0        3.6T  3.0T  578G  85% /export/dump
+1.24.2 3.7.0

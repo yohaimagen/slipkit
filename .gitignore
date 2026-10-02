@@ -159,3 +159,12 @@ Thumbs.db
 
 *.png
 /test_notebooks/
+
+# Version the canonical CPU AlTar tutorial and immutable fixture checksums.
+!examples/altar_synthetic_tutorial.ipynb
+!slipkit/tests/fixtures/altar/*/sha256.json
+!pytest.ini
+
+# Generated native sampler work directories and scratch output
+native-runs/
+/altar_synthetic_run/temp

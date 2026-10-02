@@ -1,102 +1,127 @@
-"""
-ALTar result importer.
-
-Reads the HDF5 files and ``BetaStatistics.txt`` that ALTar writes after a
-static slip inversion and constructs an ``AltarSlipDistribution``.
-"""
-
+"""Strict final-state import without inventing geometry or parameter order."""
 import os
+import hashlib
+import json
 import warnings
-from typing import List, Optional
-
+from pathlib import Path
 import h5py
 import numpy as np
 import pandas as pd
+from .results import AltarPosterior
+from .problem import file_hash
 
 
 class AltarResultImporter:
-    """Reads ALTar's output directory and builds posterior sample arrays.
+    def load(self, results_dir, n_parameters=None, *, manifest=None, allow_incomplete=False, stage_file=None):
+        run_path = os.path.dirname(os.path.abspath(results_dir))
+        if manifest is None:
+            for parent in Path(results_dir).resolve().parents:
+                path = parent/'manifest.json'
+                if path.is_file():
+                    manifest = path
+                    break
+        if isinstance(manifest, (str, os.PathLike)):
+            run_path = str(Path(manifest).resolve().parent)
+            with open(manifest) as stream:
+                manifest = json.load(stream)
+        manifest = manifest or {}
+        if manifest.get('output_dir'):
+            parts = Path(manifest['output_dir']).parts
+            resolved = Path(results_dir).resolve()
+            if not Path(manifest['output_dir']).is_absolute() and tuple(resolved.parts[-len(parts):]) == parts:
+                run_path = str(resolved.parents[len(parts)-1])
+        if manifest.get('status') == 'failed' and not allow_incomplete:
+            raise ValueError('A failed run manifest cannot expose a successful posterior.')
+        expected = manifest.get('n_parameters', n_parameters)
+        if expected is None or expected <= 0:
+            raise ValueError('Expected parameter count or a run manifest is required.')
+        if n_parameters is not None and n_parameters != expected:
+            raise ValueError('Manifest and requested parameter counts differ.')
+        final = os.path.join(results_dir, 'step_final.h5')
+        diagnostic_only = manifest.get('status') == 'failed' or stage_file is not None
+        if stage_file is not None:
+            if not allow_incomplete or Path(stage_file).name != str(stage_file) or not str(stage_file).startswith('step_') or not str(stage_file).endswith('.h5'):
+                raise ValueError('Explicit stage imports require a contained archive and allow_incomplete=True.')
+            final = os.path.join(results_dir, stage_file)
 
-    ALTar writes one HDF5 file per beta step (``step_000.h5``, …) plus a
-    final ``step_final.h5`` containing the samples at ``beta = 1``. A plain-
-    text file ``BetaStatistics.txt`` records the annealing trajectory.
-
-    Typical HDF5 layout::
-
-        step_final.h5
-        ├── Annealer/
-        │   ├── beta          (scalar)
-        │   └── covariance    (N_param × N_param)
-        ├── Bayesian/
-        │   ├── prior         (N_chains,)
-        │   ├── likelihood    (N_chains,)
-        │   └── posterior     (N_chains,)
-        └── ParameterSets/
-            ├── strikeslip    (N_chains × M_patches)
-            └── dipslip       (N_chains × M_patches)
-    """
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
-    def load(
-        self,
-        results_dir: str,
-        n_patches: int,
-        convergence_tolerance: float = 1e-3,
-    ) -> "AltarSlipDistribution":  # noqa: F821
-        """Loads the final posterior samples from an ALTar results directory.
-
-        Args:
-            results_dir: Path to the directory containing ALTar output files.
-            n_patches: Number of fault patches (M).
-            convergence_tolerance: Tolerance for checking ``beta == 1``.
-
-        Returns:
-            An ``AltarSlipDistribution`` populated with posterior samples,
-            beta statistics, and convergence metadata.
-
-        Raises:
-            FileNotFoundError: If ``step_final.h5`` is not found.
-        """
-        from slipkit.core.bayesian.results import AltarSlipDistribution
-
-        final_h5 = os.path.join(results_dir, "step_final.h5")
-        if not os.path.isfile(final_h5):
-            raise FileNotFoundError(
-                f"ALTar final output not found: {final_h5}\n"
-                "Ensure the ALTar simulation completed successfully."
-            )
-
-        ss_samples, ds_samples, final_beta = self._read_final_step(
-            final_h5, n_patches
-        )
-        beta_stats = self.load_beta_statistics(results_dir)
-        step_files = self._list_step_files(results_dir)
-
-        if abs(final_beta - 1.0) > convergence_tolerance:
-            warnings.warn(
-                f"ALTar simulation may not have converged: "
-                f"final beta = {final_beta:.4f} (expected 1.0). "
-                "Consider increasing `chains` or `steps`.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-
-        mean_slip = np.concatenate(
-            [ss_samples.mean(axis=0), ds_samples.mean(axis=0)]
-        )
-
-        return AltarSlipDistribution(
-            slip_vector=mean_slip,
-            faults=[],
-            ss_samples=ss_samples,
-            ds_samples=ds_samples,
-            beta_statistics=beta_stats,
-            final_beta=final_beta,
-            step_files=step_files,
-        )
+        if not os.path.isfile(final) and allow_incomplete and stage_file is None:
+            stages = [name for name in os.listdir(results_dir)
+                      if name.startswith('step_') and name.endswith('.h5') and name[5:-3].isdigit()]
+            if stages:
+                final = os.path.join(results_dir, max(stages, key=lambda name: int(name[5:-3])))
+                diagnostic_only = True
+        with h5py.File(final, 'r') as archive:
+            beta = float(np.asarray(archive['Annealer/beta']).item())
+            if not np.isfinite(beta) or beta < 0 or beta > 1:
+                raise ValueError('Invalid annealing beta.')
+            if abs(beta-1.) > 1e-8 and not allow_incomplete:
+                raise ValueError('Incomplete annealing output is not a posterior (beta != 1).')
+            group = archive['ParameterSets']
+            if set(group.keys()) == {'theta'}:
+                samples = np.asarray(group['theta'], dtype=float)
+            else:
+                sets = manifest.get('parameter_sets')
+                if not sets or len({s['name'] for s in sets}) != len(sets) or set(group.keys()) != {s['name'] for s in sets}:
+                    raise ValueError('Named parameter sets require exact manifest order and widths.')
+                blocks = []
+                for entry in sets:
+                    block = np.asarray(group[entry['name']], dtype=float)
+                    if block.ndim != 2 or block.shape[1] != entry['width']:
+                        raise ValueError('Named parameter set width mismatch.')
+                    blocks.append(block)
+                if len({b.shape[0] for b in blocks}) != 1:
+                    raise ValueError('Named parameter sets have inconsistent particle counts.')
+                samples = np.hstack(blocks)
+            if samples.ndim != 2 or samples.shape[0] < 2 or samples.shape[1] != expected or not np.isfinite(samples).all():
+                raise ValueError('Final samples must be finite with shape (at least 2 particles, N_param).')
+            if 'chains' in manifest and len(samples) != manifest['chains']:
+                raise ValueError('Final particle count does not match the serial run manifest.')
+            probabilities = {}
+            if 'Bayesian' in archive:
+                for name in ('prior', 'likelihood', 'posterior'):
+                    if name in archive['Bayesian']:
+                        values = np.asarray(archive['Bayesian'][name], dtype=float).reshape(-1)
+                        if values.shape != (len(samples),) or not np.isfinite(values).all():
+                            raise ValueError(f'Invalid {name} probability array.')
+                        probabilities[name] = values
+        transform = manifest.get('transform')
+        if transform:
+            if 'file' in transform:
+                path = Path(run_path)/transform['file']
+                if path.resolve().parent != Path(run_path).resolve():
+                    raise ValueError('Transform file must be inside the isolated run.')
+                if file_hash(path) != transform['sha256']:
+                    raise ValueError('Prior transform checksum mismatch.')
+                with np.load(path, allow_pickle=False) as arrays:
+                    offset, matrix = arrays['offset'], arrays['matrix']
+            else:
+                offset = np.asarray(transform['offset'])
+                matrix = np.asarray(transform.get('scales', transform.get('matrix')))
+            if offset.shape != (expected,) or matrix.shape not in ((expected,), (expected, expected)):
+                raise ValueError('Invalid saved prior transform dimensions.')
+            samples = (samples*matrix if matrix.ndim == 1 else samples @ matrix.T) + offset
+            if not np.isfinite(samples).all():
+                raise ValueError('Nonfinite physical samples after transform.')
+            if manifest.get('prior') == 'uniform':
+                upper = offset + (matrix if matrix.ndim == 1 else np.diag(matrix))
+                if np.any(samples < offset) or np.any(samples > upper):
+                    raise ValueError('Uniform posterior samples violate physical bounds.')
+        likelihood_offset = manifest.get('likelihood_offset', 0.)
+        prior_offset = manifest.get('prior_offset', 0.)
+        if not np.isfinite([likelihood_offset, prior_offset]).all():
+            raise ValueError('Probability normalization offsets must be finite.')
+        for name, adjustment in dict(likelihood=likelihood_offset, prior=prior_offset,
+                                     posterior=prior_offset+beta*likelihood_offset).items():
+            if name in probabilities:
+                probabilities[name] += adjustment
+        record = AltarPosterior(samples, beta, self.load_beta_statistics(results_dir), probabilities,
+                                manifest.get('layout', []), run_path,
+                                [os.path.join(results_dir, f) for f in sorted(os.listdir(results_dir))
+                                 if f.startswith('step_') and f.endswith('.h5')])
+        record.diagnostics['diagnostic_only'] = diagnostic_only or not record.annealing_complete
+        if record.diagnostics['diagnostic_only']:
+            record.diagnostics['sampling_adequacy'] = 'incomplete: diagnostic output only'
+        return record
 
     def load_beta_statistics(self, results_dir: str) -> pd.DataFrame:
         """Parses ``BetaStatistics.txt`` into a tidy DataFrame.
@@ -111,6 +136,13 @@ class AltarResultImporter:
         """
         path = os.path.join(results_dir, "BetaStatistics.txt")
         if not os.path.isfile(path):
+            for parent in Path(results_dir).resolve().parents:
+                progress = parent/'progress.json'
+                if progress.is_file() and (parent/'manifest.json').is_file():
+                    stages = json.loads(progress.read_text()).get('stages', [])
+                    if stages:
+                        return pd.DataFrame(stages).rename(columns={'next_scaling': 'scaling'})
+                    break
             warnings.warn(
                 f"BetaStatistics.txt not found in {results_dir}.",
                 RuntimeWarning,
@@ -142,84 +174,3 @@ class AltarResultImporter:
                     continue
 
         return pd.DataFrame(records)
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-
-    def _read_final_step(
-        self, h5_path: str, n_patches: int
-    ) -> tuple:
-        """Reads posterior samples and beta from ``step_final.h5``.
-
-        Args:
-            h5_path: Path to the HDF5 file.
-            n_patches: Number of fault patches.
-
-        Returns:
-            Tuple ``(ss_samples, ds_samples, final_beta)`` where
-            ``ss_samples`` and ``ds_samples`` each have shape
-            ``(N_chains, M_patches)``.
-
-        Raises:
-            KeyError: If expected datasets are missing from the HDF5 file.
-        """
-        with h5py.File(h5_path, "r") as f:
-            final_beta = float(np.array(f["Annealer/beta"]))
-
-            psets = f["ParameterSets"]
-            # ALTar stores parameter sets under their psets_list names.
-            # We support both "strikeslip"/"dipslip" and "strike_slip"/"dip_slip".
-            ss_key = self._find_key(psets, ["strikeslip", "strike_slip"])
-            ds_key = self._find_key(psets, ["dipslip", "dip_slip"])
-
-            ss_samples = np.array(psets[ss_key])  # (N_chains, M)
-            ds_samples = np.array(psets[ds_key])  # (N_chains, M)
-
-        if ss_samples.shape[1] != n_patches or ds_samples.shape[1] != n_patches:
-            raise ValueError(
-                f"Expected {n_patches} patches in posterior samples, "
-                f"got strikeslip={ss_samples.shape[1]}, "
-                f"dipslip={ds_samples.shape[1]}."
-            )
-
-        return ss_samples, ds_samples, final_beta
-
-    @staticmethod
-    def _find_key(group: h5py.Group, candidates: List[str]) -> str:
-        """Returns the first candidate key present in an HDF5 group.
-
-        Args:
-            group: The HDF5 group to search.
-            candidates: Ordered list of key names to try.
-
-        Returns:
-            The first matching key name.
-
-        Raises:
-            KeyError: If none of the candidates exist in the group.
-        """
-        for key in candidates:
-            if key in group:
-                return key
-        raise KeyError(
-            f"None of {candidates} found in HDF5 group '{group.name}'. "
-            f"Available keys: {list(group.keys())}"
-        )
-
-    @staticmethod
-    def _list_step_files(results_dir: str) -> List[str]:
-        """Returns sorted paths to all ``step_*.h5`` files in the results dir.
-
-        Args:
-            results_dir: Path to the ALTar results directory.
-
-        Returns:
-            Sorted list of absolute paths to HDF5 step files.
-        """
-        files = [
-            os.path.join(results_dir, f)
-            for f in sorted(os.listdir(results_dir))
-            if f.startswith("step_") and f.endswith(".h5")
-        ]
-        return files

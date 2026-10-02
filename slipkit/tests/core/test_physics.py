@@ -170,3 +170,20 @@ def test_predict_slip_length_mismatch():
     )
     with pytest.raises(ValueError, match="does not match"):
         CutdeCpuEngine(0.25).predict(fault, dataset, np.ones(3))
+
+
+@pytest.mark.parametrize('components', [(SlipComponent.STRIKE_SLIP,), (SlipComponent.DIP_SLIP,), (SlipComponent.STRIKE_SLIP, SlipComponent.DIP_SLIP)])
+def test_chunked_kernel_preserves_projection_signs_and_predictions(sample_fault_mesh, sample_geodetic_dataset, components):
+    f = TriangularFaultMesh((sample_fault_mesh.vertices, sample_fault_mesh.faces),
+        strike_slip_type=StrikeSlipType.LEFT_LATERAL, dip_slip_type=DipSlipType.NORMAL,
+        slip_components=components)
+    d = sample_geodetic_dataset
+    d.coords[:, 2] = 0
+    expected = CutdeCpuEngine(observation_chunk_size=100).build_kernel(f, d)
+    engine = CutdeCpuEngine(observation_chunk_size=3)
+    with patch('slipkit.core.physics.HS.disp_matrix', wraps=__import__('cutde.halfspace', fromlist=['disp_matrix']).disp_matrix) as calls:
+        actual = engine.build_kernel(f, d)
+    assert [len(c.kwargs['obs_pts']) for c in calls.call_args_list] == [3, 3, 3, 1]
+    np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-14)
+    slip = np.arange(actual.shape[1], dtype=float)/10
+    np.testing.assert_allclose(actual @ slip, engine.predict(f, d, slip), rtol=1e-10, atol=1e-13)

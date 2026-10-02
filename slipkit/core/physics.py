@@ -65,14 +65,17 @@ class CutdeCpuEngine(GreenFunctionBuilder):
     Green's function engine using the `cutde` library on the CPU.
     """
 
-    def __init__(self, poisson_ratio: float = 0.25):
+    def __init__(self, poisson_ratio: float = 0.25, *, observation_chunk_size=512):
         """
         Initializes the CutdeCpuEngine.
 
         Args:
             poisson_ratio: Poisson's ratio for the elastic medium.
         """
+        if not isinstance(observation_chunk_size, int) or isinstance(observation_chunk_size, bool) or observation_chunk_size <= 0:
+            raise ValueError("observation_chunk_size must be a positive integer.")
         self.nu = poisson_ratio
+        self.observation_chunk_size = observation_chunk_size
 
     def build_kernel(
         self, fault: TriangularFaultMesh, dataset: GeodeticDataSet
@@ -101,44 +104,19 @@ class CutdeCpuEngine(GreenFunctionBuilder):
         verts, faces = fault.get_mesh_geometry()
         tris = verts[faces]
 
-        # This returns a (N, M, 3, 3) matrix mapping slip to displacement
-        # (obs_idx, tri_idx, disp_dim, slip_dim)
-        disp_mat = HS.disp_matrix(obs_pts=obs_pts, tris=tris, nu=self.nu)
-
-        n_obs = obs_pts.shape[0]
-        n_patches = fault.num_patches()
-
-        # Initialize the final (N, k*M) Green's function matrix.
-        g_matrix = np.zeros((n_obs, fault.num_components() * n_patches))
-
-        # Project displacements onto unit vectors (e.g., satellite LOS).
-        # dataset.unit_vecs is (N, 3); align dimensions for broadcasting against
-        # disp_mat's (N, 3, M) slices -> unit_vecs needs to be (N, 3, 1).
-        unit_vecs_expanded = dataset.unit_vecs[:, :, np.newaxis]
-
-        # Build one M-wide block per active component, in canonical order.
-        for component in fault.active_components():
-            slip_dim = _COMPONENT_SLIP_DIM[component]
-
-            # disp_mat[:, :, :, slip_dim] is (N, 3, M); multiply by (N, 3, 1)
-            # and sum over the displacement components (axis=1) -> (N, M).
-            response = np.sum(
-                disp_mat[:, :, :, slip_dim] * unit_vecs_expanded, axis=1
-            )
-
-            # Apply the sign convention for this component (only when active).
-            if (
-                component == SlipComponent.STRIKE_SLIP
-                and fault.strike_slip_type == StrikeSlipType.LEFT_LATERAL
-            ):
-                response = -response
-            elif (
-                component == SlipComponent.DIP_SLIP
-                and fault.dip_slip_type == DipSlipType.NORMAL
-            ):
-                response = -response
-
-            g_matrix[:, fault.component_slice(component)] = response
+        n_obs, n_patches = obs_pts.shape[0], fault.num_patches()
+        g_matrix = np.empty((n_obs, fault.num_components()*n_patches))
+        for start in range(0, n_obs, self.observation_chunk_size):
+            stop = min(start+self.observation_chunk_size, n_obs)
+            disp_mat = HS.disp_matrix(obs_pts=obs_pts[start:stop], tris=tris, nu=self.nu)
+            unit_vecs = dataset.unit_vecs[start:stop, :, np.newaxis]
+            for component in fault.active_components():
+                response = np.sum(disp_mat[:, :, :, _COMPONENT_SLIP_DIM[component]]*unit_vecs, axis=1)
+                if (component == SlipComponent.STRIKE_SLIP and fault.strike_slip_type == StrikeSlipType.LEFT_LATERAL
+                    or component == SlipComponent.DIP_SLIP and fault.dip_slip_type == DipSlipType.NORMAL):
+                    response *= -1
+                g_matrix[start:stop, fault.component_slice(component)] = response
+            del disp_mat
 
         return g_matrix
 

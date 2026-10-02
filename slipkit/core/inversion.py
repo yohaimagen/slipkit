@@ -4,6 +4,7 @@ user-facing API for setting up and running a slip inversion.
 """
 
 import os
+import sys
 from concurrent.futures import ProcessPoolExecutor
 from typing import Dict, List, Optional, Tuple, Union
 from abc import ABC, abstractmethod
@@ -587,6 +588,11 @@ class InversionOrchestrator:
             ValueError: If nuisance parameters are requested while the solver
                 cannot represent negative unknowns (e.g. :class:`NnlsSolver`).
         """
+        bayesian_module = sys.modules.get('slipkit.core.bayesian.solver')
+        is_bayesian = bayesian_module is not None and isinstance(self.solver, bayesian_module.AltarBayesianSolver)
+        if is_bayesian:
+            self.solver.reset()
+
         if not self.faults:
             raise ValueError("No fault models added to the inversion.")
         if not self.datasets:
@@ -595,6 +601,23 @@ class InversionOrchestrator:
             raise ValueError("No GreenFunctionBuilder engine has been set.")
         if self.solver is None:
             raise ValueError("No SolverStrategy has been set.")
+
+        # One explicit adaptation point: generic posterior -> real fault geometry.
+        if is_bayesian:
+            from slipkit.core.bayesian.assembler import AltarAssembler
+            from slipkit.core.bayesian.results import AltarSlipDistribution
+            if not isinstance(self.assembler, AltarAssembler):
+                raise ValueError('AltarBayesianSolver requires AltarAssembler with raw Bayesian inputs.')
+            problem = self.assembler.assemble_problem(
+                self.faults, self.datasets, self.engine,
+                self._regularization_manager, lambda_spatial,
+            )
+            n_slip = sum(f.num_components()*f.num_patches() for f in self.faults)
+            n_nuisance = sum(nuisance_widths(nuisance_bases(self.datasets)))
+            self.solver.solve_problem(problem, _extend_bounds(bounds, n_slip, n_nuisance))
+            result = AltarSlipDistribution(self.solver.get_last_posterior(), self.faults, self.datasets)
+            self.solver.last_result = result
+            return result
 
         n_slip = sum(f.num_components() * f.num_patches() for f in self.faults)
         widths = nuisance_widths(nuisance_bases(self.datasets))
@@ -624,14 +647,6 @@ class InversionOrchestrator:
         solution_vector_m = self.solver.solve(A_augmented, b_augmented, bounds)
 
         # --- 3. Map Phase ---
-        # If the solver produced a richer result object (e.g. AltarSlipDistribution
-        # with posterior samples), return that directly instead of wrapping the
-        # plain mean vector in a base SlipDistribution.
-        if hasattr(self.solver, "get_last_result"):
-            rich_result = self.solver.get_last_result()
-            if rich_result is not None:
-                return rich_result
-
         nuisance: Dict[str, Ramp] = {}
         offset = n_slip
         for dataset, width in zip(self.datasets, widths):
